@@ -64,7 +64,6 @@ csharp/                  Ứng dụng WPF (.NET)
   Views/                 HUD, Thống kê, Cài đặt, Toast
   SelfTest/              Kiểm thử logic (không cần gói ngoài)
 statusline/statusline.js Script statusLine cho Claude Code
-python/                  Bản thử nghiệm cũ, không còn được cập nhật
 ```
 
 ## Kiểm thử
