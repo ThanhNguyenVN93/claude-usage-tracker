@@ -117,7 +117,16 @@ namespace ClaudeUsageTracker
             // Làm mới định kỳ để tuổi dữ liệu, cảnh báo "cũ" và ước tính tự cập nhật
             // ngay cả khi file nguồn ngừng đổi (watcher chỉ chạy khi file thay đổi).
             _tick = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
-            _tick.Tick += async (s, ev) => await RefreshUsageAsync();
+            _tick.Tick += async (s, ev) =>
+            {
+                // Reset snooze menu text sau khi hết hạn
+                if (_snoozeUntil != default && DateTime.Now >= _snoozeUntil && _snoozeMenuItem != null
+                    && _snoozeMenuItem.Text != "🔕 Tắt thông báo 1 giờ")
+                {
+                    _snoozeMenuItem.Text = "🔕 Tắt thông báo 1 giờ";
+                }
+                await RefreshUsageAsync();
+            };
             _tick.Start();
 
             // Kiểm tra bản mới: lúc khởi động (sau 20 giây) rồi mỗi 6 giờ. Chỉ thông báo; tải về phải hỏi.
