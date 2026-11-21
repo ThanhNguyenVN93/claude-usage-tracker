@@ -40,6 +40,7 @@ namespace ClaudeUsageTracker
         private ToolStripMenuItem? _updateMenuItem;
         private bool _balloonIsUpdate;
         private string? _lastIconHex;
+        private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
         private GlobalHotkeyService? _hotkeyStats;
         private ToolStripMenuItem? _hudMenuItem;
@@ -405,11 +406,13 @@ namespace ClaudeUsageTracker
                 if (info.ConditionLevel == AlertLevel.Critical) hex = "#EF4444";
                 else if (info.ConditionLevel == AlertLevel.Warn && hex == "#10B981") hex = "#F59E0B";
 
-                if (hex != _lastIconHex && _notifyIcon.ContextMenuStrip?.Visible != true)
+                int pct = (int)Math.Round(info.PercentUsed);
+                if ((hex != _lastIconHex || pct != _lastIconPct) && _notifyIcon.ContextMenuStrip?.Visible != true)
                 {
                     _lastIconHex = hex;
+                    _lastIconPct = pct;
                     var oldIcon = _notifyIcon.Icon;
-                    _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex), (int)Math.Round(info.PercentUsed));
+                    _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex), pct);
                     oldIcon?.Dispose();
                 }
             }
