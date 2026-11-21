@@ -308,8 +308,10 @@ namespace ClaudeUsageTracker.Services
 
         public void Dispose()
         {
-            _cts?.Cancel();
-            _cts?.Dispose();
+            var cts = _cts;
+            _cts = null;
+            try { cts?.Cancel(); } catch (ObjectDisposedException) { }
+            cts?.Dispose();
             _http.Dispose();
         }
 
