@@ -255,7 +255,7 @@ namespace ClaudeUsageTracker.Views
             // Hour labels at 0h, 6h, 12h, 18h, now
             foreach (int markerHour in new[] { 0, 6, 12, 18 })
             {
-                int slot = (markerHour - now.Hour + 24) % 24;
+                int slot = (markerHour - now.Hour + 47) % 24; // +47 = +23+24 để khớp với slot = 23 - floor(hoursAgo)
                 // Label below
                 var lbl = new TextBlock { Text = $"{markerHour:D2}", FontSize = 8, Foreground = Brush("#6C7086") };
                 Canvas.SetLeft(lbl, slot * slotW);

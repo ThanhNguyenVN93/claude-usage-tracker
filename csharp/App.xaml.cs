@@ -38,7 +38,6 @@ namespace ClaudeUsageTracker
         private UpdateState _updateState = null!;
         private ReleaseInfo? _availableUpdate;
         private ToolStripMenuItem? _updateMenuItem;
-        private bool _balloonIsUpdate;
         private string? _lastIconHex;
         private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
@@ -231,10 +230,6 @@ namespace ClaudeUsageTracker
             contextMenu.Items.Add("❌ Thoát", null, (s, e) => ExitApplication());
 
             _notifyIcon.ContextMenuStrip = contextMenu;
-            _notifyIcon.BalloonTipClicked += async (s, e) =>
-            {
-                if (_balloonIsUpdate && _availableUpdate != null) await PromptAndApplyUpdateAsync();
-            };
             _notifyIcon.MouseClick += (s, e) =>
             {
                 if (e.Button == MouseButtons.Left) ToggleHud();
@@ -430,14 +425,12 @@ namespace ClaudeUsageTracker
         private static Version CurrentVersion() =>
             System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version ?? new Version(0, 0, 0);
 
-        private void ShowBalloon(string title, string text, ToolTipIcon icon, bool isUpdate = false)
+        private void ShowBalloon(string title, string text, ToolTipIcon icon)
         {
             if (_notifyIcon == null) return;
-            _balloonIsUpdate = isUpdate;
             string toastIcon = icon == ToolTipIcon.Error ? "🔴"
                              : icon == ToolTipIcon.Warning ? "🟡" : "ℹ️";
-            ToastWindow.ShowToast(title, text, toastIcon,
-                onAction: isUpdate && _availableUpdate != null ? () => _ = PromptAndApplyUpdateAsync() : null);
+            ToastWindow.ShowToast(title, text, toastIcon);
         }
 
         private async Task CheckForUpdateAsync(bool manual, TimeSpan? delay = null)
@@ -467,11 +460,9 @@ namespace ClaudeUsageTracker
                     if (manual || _updateState.NotifiedTag != release.Tag)
                     {
                         _updateState.NotifiedTag = release.Tag;
-                        ShowBalloon($"Có bản mới {release.Tag}",
-                            "Bấm vào đây (hoặc menu tray › Cập nhật) để xem và cài đặt. Sẽ hỏi lại trước khi tải.",
-                            ToolTipIcon.Info, isUpdate: true);
                         if (manual)
                         {
+                            // Manual: chỉ MessageBox (rõ hơn toast)
                             string notes = string.IsNullOrWhiteSpace(release.Notes) ? "" : $"\n\n{release.Notes}";
                             var ans = MessageBox.Show(
                                 $"Có bản mới {release.Tag} (đang dùng v{UpdateLogic.Normalize(CurrentVersion())}).{notes}\n\nMở trang tải về trên GitHub?",
@@ -479,11 +470,16 @@ namespace ClaudeUsageTracker
                             if (ans == MessageBoxResult.Yes)
                                 System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(release.HtmlUrl) { UseShellExecute = true });
                         }
+                        else
+                        {
+                            ShowBalloon($"Có bản mới {release.Tag}",
+                                "Menu tray › Cập nhật để xem và cài đặt.",
+                                ToolTipIcon.Info);
+                        }
                     }
                 }
                 else if (manual)
                 {
-                    ShowBalloon("Đang dùng bản mới nhất", $"Phiên bản hiện tại: v{UpdateLogic.Normalize(CurrentVersion())}", ToolTipIcon.Info);
                     MessageBox.Show($"Đang dùng bản mới nhất.\nPhiên bản hiện tại: v{UpdateLogic.Normalize(CurrentVersion())}",
                         "Kiểm tra bản mới", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
@@ -629,7 +625,10 @@ namespace ClaudeUsageTracker
             try
             {
                 // Discord webhook: {"content": "..."} ; generic: same format works for most
-                string payload = $"{{\"content\":\"**{title}**\\n{message}\"}}";
+                // Dùng JsonSerializer.Serialize để escape title/message an toàn (tránh " hay \ làm vỡ JSON)
+                string combined = $"**{title}**\n{message}";
+                string escaped = System.Text.Json.JsonSerializer.Serialize(combined);
+                string payload = $"{{\"content\":{escaped}}}";
                 using var content = new StringContent(payload, Encoding.UTF8, "application/json");
                 await _webhookHttp.PostAsync(url, content);
             }
