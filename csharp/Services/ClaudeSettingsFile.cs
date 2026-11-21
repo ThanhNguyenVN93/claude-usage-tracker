@@ -37,6 +37,7 @@ namespace ClaudeUsageTracker.Services
             try
             {
                 BackupOnce();
+                Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
 
                 if (model == null) root.Remove("model");
                 else root["model"] = model;
@@ -56,17 +57,19 @@ namespace ClaudeUsageTracker.Services
         {
             try
             {
-                if (!File.Exists(_path)) return null;
+                // File chưa tồn tại → trả object rỗng để WriteModel() có thể tạo mới.
+                if (!File.Exists(_path)) return new JsonObject();
                 return JsonNode.Parse(File.ReadAllText(_path)) as JsonObject;
             }
             catch
             {
-                return null;
+                return null; // JSON lỗi: không ghi đè
             }
         }
 
         private void BackupOnce()
         {
+            if (!File.Exists(_path)) return; // không backup nếu chưa có file
             string backup = _path + ".tracker.bak";
             if (!File.Exists(backup)) File.Copy(_path, backup);
         }
