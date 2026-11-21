@@ -400,18 +400,33 @@ namespace ClaudeUsageTracker
                         ShowBalloon($"Có bản mới {release.Tag}",
                             "Bấm vào đây (hoặc menu tray › Cập nhật) để xem và cài đặt. Sẽ hỏi lại trước khi tải.",
                             ToolTipIcon.Info, isUpdate: true);
+                        if (manual)
+                        {
+                            string notes = string.IsNullOrWhiteSpace(release.Notes) ? "" : $"\n\n{release.Notes}";
+                            var ans = MessageBox.Show(
+                                $"Có bản mới {release.Tag} (đang dùng v{UpdateLogic.Normalize(CurrentVersion())}).{notes}\n\nMở trang tải về trên GitHub?",
+                                "Kiểm tra bản mới", MessageBoxButton.YesNo, MessageBoxImage.Information);
+                            if (ans == MessageBoxResult.Yes)
+                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(release.HtmlUrl) { UseShellExecute = true });
+                        }
                     }
                 }
                 else if (manual)
                 {
                     ShowBalloon("Đang dùng bản mới nhất", $"Phiên bản hiện tại: v{UpdateLogic.Normalize(CurrentVersion())}", ToolTipIcon.Info);
+                    MessageBox.Show($"Đang dùng bản mới nhất.\nPhiên bản hiện tại: v{UpdateLogic.Normalize(CurrentVersion())}",
+                        "Kiểm tra bản mới", MessageBoxButton.OK, MessageBoxImage.Information);
                 }
 
                 _updateState.Save();
             }
             catch (Exception ex)
             {
-                if (manual) ShowBalloon("Không kiểm tra được bản mới", ex.Message, ToolTipIcon.Warning);
+                if (manual)
+                {
+                    ShowBalloon("Không kiểm tra được bản mới", ex.Message, ToolTipIcon.Warning);
+                    MessageBox.Show($"Không kiểm tra được bản mới:\n{ex.Message}", "Kiểm tra bản mới", MessageBoxButton.OK, MessageBoxImage.Warning);
+                }
             }
         }
 
