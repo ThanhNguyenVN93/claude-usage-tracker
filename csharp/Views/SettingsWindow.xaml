@@ -2,7 +2,8 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Cài đặt Claude Usage Tracker" Height="780" Width="480"
-        WindowStartupLocation="CenterScreen" WindowStyle="ToolWindow" Background="#181825">
+        WindowStartupLocation="CenterScreen" WindowStyle="ToolWindow" Background="#181825"
+        Icon="pack://application:,,,/Resources/app.ico">
 
     <Grid Margin="18">
         <Grid.RowDefinitions>

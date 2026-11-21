@@ -194,18 +194,32 @@ namespace ClaudeUsageTracker
             };
         }
 
-        private Icon CreateClaudeIcon(Color bg)
+        private Icon CreateClaudeIcon(Color accentColor)
         {
             try
             {
                 using var bmp = new Bitmap(32, 32);
                 using var g = Graphics.FromImage(bmp);
                 g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
-                using var bgBrush = new SolidBrush(bg);
-                g.FillEllipse(bgBrush, 2, 2, 28, 28);
-                using var textBrush = new SolidBrush(Color.White);
-                using var font = new Font("Segoe UI", 14, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
-                g.DrawString("C", font, textBrush, 9, 7);
+                g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+                g.Clear(Color.Transparent);
+
+                // Dark background circle
+                using var bgBrush = new SolidBrush(Color.FromArgb(255, 30, 30, 46));
+                g.FillEllipse(bgBrush, 1, 1, 30, 30);
+
+                // Gauge arc 270° from bottom-left, color = usage level
+                using var arcPen = new Pen(accentColor, 3.5f);
+                arcPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
+                arcPen.EndCap   = System.Drawing.Drawing2D.LineCap.Round;
+                g.DrawArc(arcPen, 5, 5, 22, 22, -225f, 270f);
+
+                // "%" in Catppuccin text color
+                using var textBrush = new SolidBrush(Color.FromArgb(220, 205, 214, 244));
+                using var font = new Font("Segoe UI", 10f, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
+                var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                g.DrawString("%", font, textBrush, new RectangleF(0, 0, 32, 32), sf);
+
                 var hIcon = bmp.GetHicon();
                 try
                 {
