@@ -28,9 +28,10 @@ namespace ClaudeUsageTracker.Services
             _windowName  = $"ClaudeUsageTracker_HotkeyHost_{hotkeyId:X4}";
         }
 
-        public void Register(AppConfig config) => Register(config.HotkeyModifiers, config.HotkeyVirtualKey);
+        /// <returns>false nếu Windows từ chối (tổ hợp đã bị app khác/instance khác chiếm).</returns>
+        public bool Register(AppConfig config) => Register(config.HotkeyModifiers, config.HotkeyVirtualKey);
 
-        public void Register(uint modifiers, uint vk)
+        public bool Register(uint modifiers, uint vk)
         {
             _modifiers = modifiers;
             _vk        = vk;
@@ -51,17 +52,19 @@ namespace ClaudeUsageTracker.Services
                 UnregisterHotKey(_source.Handle, _id);
             }
 
-            RegisterHotKey(_source.Handle, _id, modifiers, vk);
+            if (modifiers == 0 || vk == 0) return false;
+            return RegisterHotKey(_source.Handle, _id, modifiers, vk);
         }
 
-        // Đổi hotkey không cần tạo lại cửa sổ.
-        public void Reregister(uint modifiers, uint vk)
+        // Đổi hotkey không cần tạo lại cửa sổ. Nếu chưa từng Register (vd. lần đầu ném lỗi) thì tạo mới.
+        public bool Reregister(uint modifiers, uint vk)
         {
-            if (_source == null) return;
+            if (_source == null) return Register(modifiers, vk);
             UnregisterHotKey(_source.Handle, _id);
             _modifiers = modifiers;
             _vk        = vk;
-            RegisterHotKey(_source.Handle, _id, modifiers, vk);
+            if (modifiers == 0 || vk == 0) return false;
+            return RegisterHotKey(_source.Handle, _id, modifiers, vk);
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

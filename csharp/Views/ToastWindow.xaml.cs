@@ -37,7 +37,13 @@ namespace ClaudeUsageTracker.Views
                 _timer.Start();
             };
 
-            MouseLeftButtonDown += (s, e) => { ActionClicked?.Invoke(); Dismiss(); };
+            MouseLeftButtonDown += (s, e) =>
+            {
+                if (_dismissed) return; // đang fade-out: không chạy action lần nữa
+                var action = ActionClicked;
+                Dismiss();
+                action?.Invoke();
+            };
         }
 
         public static ToastWindow ShowToast(string title, string body, string icon = "🔔", Action? onAction = null)
@@ -58,8 +64,13 @@ namespace ClaudeUsageTracker.Views
             if (_remaining <= 0) Dismiss();
         }
 
+        private bool _dismissed;
+
         public void Dismiss()
         {
+            // Tick hết giờ + click/✕ + toast mới cùng lúc có thể gọi Dismiss nhiều lần → chạy FadeOut và Close() lặp.
+            if (_dismissed) return;
+            _dismissed = true;
             _timer.Stop();
             if (_current == this) _current = null;
             try
@@ -72,6 +83,17 @@ namespace ClaudeUsageTracker.Views
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e) => Dismiss();
+
+        protected override void OnClosed(EventArgs e)
+        {
+            // Đóng ngoài luồng Dismiss (vd. Shutdown) vẫn phải dừng timer và không để _current trỏ vào cửa sổ đã đóng.
+            _dismissed = true;
+            _timer.Stop();
+            _timer.Tick -= OnTick;
+            ActionClicked = null;
+            if (_current == this) _current = null;
+            base.OnClosed(e);
+        }
 
         private void PositionBottomRight()
         {

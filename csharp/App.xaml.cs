@@ -15,6 +15,7 @@ using ClaudeUsageTracker.Services;
 using ClaudeUsageTracker.Views;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
+using Microsoft.Win32;
 
 namespace ClaudeUsageTracker
 {
@@ -53,9 +54,27 @@ namespace ClaudeUsageTracker
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
 
+        private static void EnsureStartupEntry()
+        {
+            const string name = "ClaudeUsageTracker";
+            string? self = Environment.ProcessPath;
+            if (self == null) return;
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
+                if (key == null) return;
+                string expected = $"\"{self}\"";
+                if (key.GetValue(name) as string != expected)
+                    key.SetValue(name, expected);
+            }
+            catch { /* không crash nếu registry bị deny */ }
+        }
+
         protected override async void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
+            EnsureStartupEntry();
 
             // Lưới an toàn: lỗi giao diện/async không lường trước chỉ được ghi log chứ không giết cả tool nền.
             DispatcherUnhandledException += (s, ev) =>
@@ -89,9 +108,12 @@ namespace ClaudeUsageTracker
             // Sync quota từ Claude.ai API ngay khi khởi động (nếu có sessionKey),
             // rồi chạy ngầm định kỳ theo ApiSyncIntervalSeconds.
             await _apiSync.SyncOnceAsync(_config);
-            _apiSync.StartBackground(_config);
+            // Người dùng có thể bấm "Thoát" trên tray trong lúc đang await sync (tối đa ~10s).
+            if (_isExiting) return;
+            _apiSync.StartBackground(_config, syncImmediately: false);
 
             _lastUsage = await FetchUsageAsync();
+            if (_isExiting) return;
             _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, _config);
             // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
             UpdateTrayTooltip(_lastUsage);
@@ -159,21 +181,39 @@ namespace ClaudeUsageTracker
             string message = string.Join("\n", alerts.Select(a => alerts.Count == 1 ? a.Message : $"• {a.Title}"));
 
             string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
-            ToastWindow.ShowToast(title, message, icon, onAction: () =>
-            {
-                _hud.ApplyData(_lastUsage!);
-                _hud.Show();
-                _hud.Activate();
-            });
+            ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
 
             if (!string.IsNullOrWhiteSpace(_config.WebhookUrl))
                 _ = PostWebhookAsync(_config.WebhookUrl, title, message);
         }
 
+        // Click vào toast: _hud/_lastUsage có thể còn null nếu toast bắn ra trong lúc khởi động.
+        private void ShowHudFromToast()
+        {
+            if (_hud == null || _lastUsage == null) return;
+            _hud.ApplyData(_lastUsage);
+            _hud.Show();
+            _hud.Activate();
+        }
+
+        // Dispatcher.Invoke(async () => ...) chọn overload Func<Task> và vứt Task đi → exception bị nuốt im lặng
+        // (chỉ lộ ra ở UnobservedTaskException khi GC chạy). Helper này chạy trên UI thread và log lỗi ngay.
+        private void RunOnUi(Func<Task> work, string context)
+        {
+            if (_isExiting) return;
+            Dispatcher.InvokeAsync(async () =>
+            {
+                if (_isExiting) return;
+                try { await work(); }
+                catch (Exception ex) { ErrorLog.Write(context, ex); }
+            });
+        }
+
         private void OnForegroundAllowedChanged(bool allowed)
         {
-            Dispatcher.Invoke(async () =>
+            RunOnUi(async () =>
             {
+                if (_hud == null) return;
                 if (allowed)
                 {
                     _lastUsage = await FetchUsageAsync();
@@ -185,12 +225,12 @@ namespace ClaudeUsageTracker
                 {
                     _hud.Hide();
                 }
-            });
+            }, nameof(OnForegroundAllowedChanged));
         }
 
         private void OnUsageFileChanged()
         {
-            Dispatcher.Invoke(async () => await RefreshUsageAsync());
+            RunOnUi(() => RefreshUsageAsync(), nameof(OnUsageFileChanged));
         }
 
         private void SetupNotifyIcon()
@@ -227,6 +267,8 @@ namespace ClaudeUsageTracker
             contextMenu.Items.Add(_syncPauseMenuItem);
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
+            contextMenu.Items.Add("🐛 Báo lỗi", null, (s, e) =>
+                Process.Start(new ProcessStartInfo("https://github.com/ThanhNguyenVN93/claude-usage-tracker/issues") { UseShellExecute = true }));
             contextMenu.Items.Add("❌ Thoát", null, (s, e) => ExitApplication());
 
             _notifyIcon.ContextMenuStrip = contextMenu;
@@ -279,7 +321,7 @@ namespace ClaudeUsageTracker
                 }
 
                 using var font = new Font("Segoe UI", fontSize, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
-                var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
+                using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
                 g.DrawString(text, font, textBrush, new RectangleF(0, 0, 32, 32), sf);
 
                 var hIcon = bmp.GetHicon();
@@ -295,7 +337,8 @@ namespace ClaudeUsageTracker
             }
             catch
             {
-                return SystemIcons.Application;
+                // Clone: UpdateTrayTooltip sẽ Dispose() icon cũ — không được dispose instance dùng chung của SystemIcons.
+                return (Icon)SystemIcons.Application.Clone();
             }
         }
 
@@ -304,7 +347,7 @@ namespace ClaudeUsageTracker
 
         private void OnClaudeLaunched()
         {
-            Dispatcher.Invoke(async () =>
+            RunOnUi(async () =>
             {
                 _lastClaudeSeenAt = DateTime.Now;
                 _apiSync.Paused = false;
@@ -317,8 +360,8 @@ namespace ClaudeUsageTracker
                     $"Claude khởi động · {_lastUsage.PercentUsed:0}% quota",
                     _lastUsage.Note,
                     "🚀",
-                    onAction: () => { _hud.ApplyData(_lastUsage!); _hud.Show(); _hud.Activate(); });
-            });
+                    onAction: ShowHudFromToast);
+            }, nameof(OnClaudeLaunched));
         }
 
         private static string FormatHotkey(uint mod, uint vk)
@@ -335,8 +378,10 @@ namespace ClaudeUsageTracker
 
         private void ToggleHud()
         {
-            Dispatcher.Invoke(async () =>
+            RunOnUi(async () =>
             {
+                // Tray icon đã hiện trước khi _hud được tạo (OnStartup còn đang await sync) → click sớm sẽ NRE.
+                if (_hud == null) return;
                 if (_hud.IsVisible)
                 {
                     _hud.Hide();
@@ -347,12 +392,12 @@ namespace ClaudeUsageTracker
                 _hud.ApplyData(_lastUsage);
                 _hud.Show();
                 _hud.Activate();
-            });
+            }, nameof(ToggleHud));
         }
 
         private void OpenStats()
         {
-            Dispatcher.Invoke(async () =>
+            RunOnUi(async () =>
             {
                 if (_statsWindow != null)
                 {
@@ -365,7 +410,18 @@ namespace ClaudeUsageTracker
                 _statsWindow.Closed += (s, e) => _statsWindow = null;
                 _statsWindow.Show();
                 _statsWindow.Activate();
-            });
+            }, nameof(OpenStats));
+        }
+
+        private static bool IsClaudeProcessRunning()
+        {
+            try
+            {
+                var procs = Process.GetProcessesByName("Claude");
+                foreach (var p in procs) p.Dispose();
+                return procs.Length > 0;
+            }
+            catch { return false; }
         }
 
         private async Task RefreshUsageAsync(bool showFeedback = false)
@@ -375,6 +431,11 @@ namespace ClaudeUsageTracker
             // Auto-pause API sync khi không thấy Claude > 30 phút
             if (_lastClaudeSeenAt != default && !_apiSync.Paused)
             {
+                // _lastClaudeSeenAt chỉ được cập nhật lúc Claude *khởi động* → nếu Claude mở liên tục > 30 phút
+                // sync bị tạm dừng nhầm. Kiểm tra tiến trình còn chạy trước khi auto-pause.
+                if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30 && IsClaudeProcessRunning())
+                    _lastClaudeSeenAt = DateTime.Now;
+
                 if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30)
                 {
                     _apiSync.Paused = true;
@@ -384,7 +445,7 @@ namespace ClaudeUsageTracker
 
             _lastUsage = await FetchUsageAsync();
             UpdateTrayTooltip(_lastUsage);
-            if (_hud.IsVisible) _hud.ApplyData(_lastUsage);
+            if (_hud != null && _hud.IsVisible) _hud.ApplyData(_lastUsage);
             _countdownWindow?.ApplyData(_lastUsage);
 
             if (showFeedback)
@@ -561,18 +622,33 @@ namespace ClaudeUsageTracker
             ExitApplication();
         }
 
+        private SettingsWindow? _settingsWindow;
         private void OpenSettings()
         {
+            // Menu tray vẫn bấm được khi dialog đang mở (WinForms message vẫn được pump) → tránh mở 2 dialog.
+            if (_settingsWindow != null) { _settingsWindow.Activate(); return; }
+
             var settings = new SettingsWindow(_config);
-            if (settings.ShowDialog() == true)
+            _settingsWindow = settings;
+            bool? result;
+            try { result = settings.ShowDialog(); }
+            finally { _settingsWindow = null; }
+
+            if (result == true)
             {
                 ConfigService.Save(_config);
-                try { _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey); } catch { }
-                try { _hotkeyStats?.Reregister(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey); } catch { }
+                bool hudOk = true, statsOk = true;
+                try { hudOk = _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey) ?? true; } catch { hudOk = false; }
+                try { statsOk = _hotkeyStats?.Reregister(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey) ?? true; } catch { statsOk = false; }
+                if (!hudOk || !statsOk)
+                    ToastWindow.ShowToast("Không đăng ký được phím tắt",
+                        "Tổ hợp phím đang bị ứng dụng khác chiếm. Hãy chọn tổ hợp khác trong Cài đặt.", "🟡");
                 if (_hudMenuItem != null)
                     _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
-                // Nếu vừa cấu hình SessionKey, sync API ngay lập tức
-                if (!string.IsNullOrWhiteSpace(_config.SessionKey))
+                // Khởi động lại vòng sync nền: lúc khởi động nếu chưa có SessionKey thì vòng lặp không bao giờ chạy,
+                // và đổi ApiSyncIntervalSeconds cũng không có hiệu lực nếu không restart. StartBackground sync ngay 1 lần.
+                _apiSync.StartBackground(_config);
+                if (_config.ApiSyncIntervalSeconds <= 0 && !string.IsNullOrWhiteSpace(_config.SessionKey))
                     _ = _apiSync.SyncOnceAsync(_config);
                 _ = RefreshUsageAsync();
             }

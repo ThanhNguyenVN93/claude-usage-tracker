@@ -20,8 +20,14 @@ namespace ClaudeUsageTracker.Services
         private readonly HttpClient _http;
         private CancellationTokenSource? _cts;
 
-        // Org-id được cache sau lần đầu gọi API thành công.
+        // Org-id được cache sau lần đầu gọi API thành công (gắn với sessionKey đã dùng để lấy nó).
         private string? _cachedOrgId;
+        private string? _cachedOrgKey;
+
+        // SyncOnceAsync bị gọi đồng thời từ vòng nền (thread pool), OnStartup, Settings và nút tiếp tục sync
+        // → read-modify-write cli-usage.json / plan-usage-history.json chồng nhau làm mất sample. Tuần tự hoá.
+        private readonly SemaphoreSlim _syncLock = new(1, 1);
+        private volatile bool _paused;
 
         public ClaudeApiSyncService()
         {
@@ -33,43 +39,61 @@ namespace ClaudeUsageTracker.Services
         // ── Public API ───────────────────────────────────────────────────────
 
         /// <summary>Tạm dừng sync (không dừng timer, chỉ bỏ qua mỗi lần gọi).</summary>
-        public bool Paused { get; set; } = false;
+        public bool Paused { get => _paused; set => _paused = value; }
 
         /// <summary>Gọi một lần rồi trả về, không ném exception ra ngoài.</summary>
         public async Task SyncOnceAsync(AppConfig config)
         {
             if (Paused) return;
-            if (string.IsNullOrWhiteSpace(config.SessionKey) ||
-                !config.SessionKey.StartsWith("sk-ant-"))
+            string? key = config.SessionKey; // đọc 1 lần: config có thể bị Settings sửa từ UI thread
+            if (string.IsNullOrWhiteSpace(key) || !key.StartsWith("sk-ant-"))
                 return;
 
             try
             {
-                await DoSyncAsync(config.SessionKey);
+                await _syncLock.WaitAsync();
+            }
+            catch (ObjectDisposedException) { return; }
+
+            try
+            {
+                await DoSyncAsync(key);
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[ApiSync] Exception: {ex.Message}");
             }
+            finally
+            {
+                _syncLock.Release();
+            }
         }
 
-        /// <summary>Bắt đầu vòng lặp sync định kỳ (chạy ngầm).</summary>
-        public void StartBackground(AppConfig config)
+        /// <summary>Bắt đầu (hoặc khởi động lại) vòng lặp sync định kỳ (chạy ngầm).</summary>
+        public void StartBackground(AppConfig config, bool syncImmediately = true)
         {
+            // Huỷ vòng cũ trước — gọi lại từ Settings không được tạo 2 vòng song song / leak CTS.
+            var old = _cts;
+            _cts = null;
+            try { old?.Cancel(); } catch (ObjectDisposedException) { }
+            old?.Dispose();
+
             if (string.IsNullOrWhiteSpace(config.SessionKey) ||
                 !config.SessionKey.StartsWith("sk-ant-"))
                 return;
 
-            _cts = new CancellationTokenSource();
-            var token = _cts.Token;
             int secs = config.ApiSyncIntervalSeconds;
             if (secs <= 0) return; // 0 = chỉ sync một lần khi khởi động, không lặp
             var interval = TimeSpan.FromSeconds(Math.Max(30, secs));
 
+            var cts = new CancellationTokenSource();
+            _cts = cts;
+            var token = cts.Token;
+
             Task.Run(async () =>
             {
-                // Sync ngay khi khởi động
-                await SyncOnceAsync(config);
+                // OnStartup đã await SyncOnceAsync trước đó → không sync trùng lần nữa.
+                if (syncImmediately) await SyncOnceAsync(config);
 
                 while (!token.IsCancellationRequested)
                 {
@@ -85,6 +109,9 @@ namespace ClaudeUsageTracker.Services
 
         private async Task DoSyncAsync(string sessionKey)
         {
+            // Đổi sessionKey (tài khoản khác) → org-id cũ không còn đúng, server trả 403 chứ không phải 401.
+            if (_cachedOrgKey != sessionKey) _cachedOrgId = null;
+
             string? orgId = _cachedOrgId ?? await FetchOrgIdAsync(sessionKey);
             if (string.IsNullOrEmpty(orgId))
             {
@@ -92,6 +119,7 @@ namespace ClaudeUsageTracker.Services
                 return;
             }
             _cachedOrgId = orgId;
+            _cachedOrgKey = sessionKey;
 
             var usage = await FetchUsageAsync(sessionKey, orgId);
             if (usage == null)
@@ -114,7 +142,7 @@ namespace ClaudeUsageTracker.Services
         {
             using var req = new HttpRequestMessage(HttpMethod.Get, "https://claude.ai/api/organizations");
             AddHeaders(req, sessionKey);
-            var res = await _http.SendAsync(req);
+            using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
                 System.Diagnostics.Debug.WriteLine($"[ApiSync] /organizations → {(int)res.StatusCode}");
@@ -135,10 +163,10 @@ namespace ClaudeUsageTracker.Services
             using var req = new HttpRequestMessage(HttpMethod.Get,
                 $"https://claude.ai/api/organizations/{orgId}/usage");
             AddHeaders(req, sessionKey);
-            var res = await _http.SendAsync(req);
+            using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
-                if ((int)res.StatusCode == 401) _cachedOrgId = null;
+                if ((int)res.StatusCode is 401 or 403 or 404) _cachedOrgId = null;
                 return null;
             }
             string body = await res.Content.ReadAsStringAsync();
@@ -298,7 +326,9 @@ namespace ClaudeUsageTracker.Services
 
                 // Thêm sample mới
                 long nowMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                string newSample = $"{{\"t\":{nowMs},\"u\":{{\"fh\":{u.FiveHourPct:0.##},\"sd\":{u.SevenDayPct:0.##}}}}}";
+                // InvariantCulture bắt buộc: culture vi-VN dùng dấu phẩy thập phân → "fh":8,5 làm hỏng JSON.
+                string newSample = string.Create(System.Globalization.CultureInfo.InvariantCulture,
+                    $"{{\"t\":{nowMs},\"u\":{{\"fh\":{u.FiveHourPct:0.##},\"sd\":{u.SevenDayPct:0.##}}}}}");
                 samplesRaw.Add(newSample);
 
                 string json = $"{{\"samples\":[{string.Join(",", samplesRaw)}]}}";

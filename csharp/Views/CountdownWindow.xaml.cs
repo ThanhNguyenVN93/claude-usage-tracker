@@ -26,6 +26,24 @@ namespace ClaudeUsageTracker.Views
                 _timer.Start();
                 UpdateDisplay();
             };
+
+            // Nút ✕ chỉ Hide() → không có Closed, timer 1s chạy mãi khi cửa sổ ẩn. Dừng/chạy theo trạng thái hiển thị.
+            IsVisibleChanged += (s, e) =>
+            {
+                if (IsVisible) { UpdateDisplay(); _timer.Start(); }
+                else _timer.Stop();
+            };
+        }
+
+        private static readonly System.Windows.Media.SolidColorBrush GreenBrush  = Frozen(0xA6, 0xE3, 0xA1);
+        private static readonly System.Windows.Media.SolidColorBrush YellowBrush = Frozen(0xF9, 0xE2, 0xAF);
+        private static readonly System.Windows.Media.SolidColorBrush RedBrush    = Frozen(0xF3, 0x8B, 0xA8);
+
+        private static System.Windows.Media.SolidColorBrush Frozen(byte r, byte g, byte b)
+        {
+            var br = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromRgb(r, g, b));
+            br.Freeze();
+            return br;
         }
 
         public void ApplyData(UsageInfo? info)
@@ -59,15 +77,13 @@ namespace ClaudeUsageTracker.Views
                 TxtResetAt.Text = _resetTime.ToString("HH:mm dd/MM");
 
                 // Color: green→yellow→red as time decreases
+                // (brush tĩnh, đã Freeze — trước đây cấp phát brush mới mỗi giây)
                 if (remaining.TotalMinutes > 60)
-                    TxtTime.Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1)); // green
+                    TxtTime.Foreground = GreenBrush;
                 else if (remaining.TotalMinutes > 15)
-                    TxtTime.Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0xF9, 0xE2, 0xAF)); // yellow
+                    TxtTime.Foreground = YellowBrush;
                 else
-                    TxtTime.Foreground = new System.Windows.Media.SolidColorBrush(
-                        System.Windows.Media.Color.FromRgb(0xF3, 0x8B, 0xA8)); // red
+                    TxtTime.Foreground = RedBrush;
             }
         }
 

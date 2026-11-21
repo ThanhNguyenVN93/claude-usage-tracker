@@ -218,13 +218,19 @@ namespace ClaudeUsageTracker.Views
             }
 
             // Group samples by hour over last 24h
+            // Gom theo GIỜ ĐỒNG HỒ (không phải cửa sổ trượt 60 phút tính từ now): tooltip "HH:xx" và nhãn 0/6/12/18
+            // đều giả định slot i = giờ (now.Hour - 23 + i). Với cửa sổ trượt, slot 23 chứa cả mẫu của giờ trước
+            // → tooltip/nhãn lệch tới 1 giờ.
             var now = DateTime.Now;
+            var currentHour = new DateTime(now.Year, now.Month, now.Day, now.Hour, 0, 0, now.Kind);
             var hourlyMax = new double[24];
             foreach (var p in series)
             {
-                double hoursAgo = (now - p.Time).TotalHours;
+                var t = p.Time;
+                var sampleHour = new DateTime(t.Year, t.Month, t.Day, t.Hour, 0, 0, t.Kind);
+                int hoursAgo = (int)Math.Round((currentHour - sampleHour).TotalHours);
                 if (hoursAgo < 0 || hoursAgo >= 24) continue;
-                int slot = 23 - (int)hoursAgo; // slot 0 = 23h ago, slot 23 = current hour
+                int slot = 23 - hoursAgo; // slot 0 = 23 giờ trước, slot 23 = giờ hiện tại
                 if (p.Value > hourlyMax[slot]) hourlyMax[slot] = p.Value;
             }
 
