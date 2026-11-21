@@ -1,0 +1,281 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Drawing;
+using System.Linq;
+using System.Threading.Tasks;
+using System.Windows;
+using System.Windows.Forms;
+using ClaudeUsageTracker.Models;
+using ClaudeUsageTracker.Services;
+using ClaudeUsageTracker.Views;
+using Application = System.Windows.Application;
+using MessageBox = System.Windows.MessageBox;
+
+namespace ClaudeUsageTracker
+{
+    public partial class App : Application
+    {
+        private NotifyIcon? _notifyIcon;
+        private AppConfig _config = null!;
+        private ClaudeUsageService _usageService = null!;
+        private InsightsService _insights = null!;
+        private ProcessWatcherService _watcherService = null!;
+        private UsageFileWatcherService _fileWatcherService = null!;
+        private ForegroundAppWatcherService _foregroundWatcher = null!;
+        private MiniHudWindow _hud = null!;
+        private StatsWindow? _statsWindow;
+        private UsageInfo? _lastUsage;
+
+        protected override async void OnStartup(StartupEventArgs e)
+        {
+            base.OnStartup(e);
+
+            _config = ConfigService.Load();
+            _usageService = new ClaudeUsageService();
+            _insights = new InsightsService(new HistoryService(), _config);
+            _insights.PruneHistory();
+            _watcherService = new ProcessWatcherService(_config.CheckIntervalSeconds);
+            _fileWatcherService = new UsageFileWatcherService();
+            _foregroundWatcher = new ForegroundAppWatcherService();
+
+            SetupNotifyIcon();
+
+            _lastUsage = await FetchUsageAsync();
+            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, _config);
+            // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
+            UpdateTrayTooltip(_lastUsage);
+
+            _watcherService.OnClaudeLaunched += OnClaudeLaunched;
+            _watcherService.Start();
+
+            _fileWatcherService.OnUsageFileChanged += OnUsageFileChanged;
+            _fileWatcherService.Start();
+
+            _foregroundWatcher.ForegroundAllowedChanged += OnForegroundAllowedChanged;
+            _foregroundWatcher.Start();
+        }
+
+        // Đọc usage, gắn dự báo/mức cảnh báo, và bắn cảnh báo mới (nếu có).
+        private async Task<UsageInfo> FetchUsageAsync()
+        {
+            var info = await _usageService.GetUsageAsync(_config);
+            var alerts = _insights.Process(info);
+            if (alerts.Count > 0) NotifyAlerts(alerts);
+            return info;
+        }
+
+        private void NotifyAlerts(List<Alert> alerts)
+        {
+            if (_notifyIcon == null) return;
+
+            var level = AlertEngine.MaxLevel(alerts);
+            string title = alerts.Count == 1 ? alerts[0].Title : $"{alerts.Count} cảnh báo usage";
+            string message = string.Join("\n", alerts.Select(a => alerts.Count == 1 ? a.Message : $"• {a.Title}"));
+
+            _notifyIcon.ShowBalloonTip(
+                8000, title, message,
+                level == AlertLevel.Critical ? ToolTipIcon.Error : ToolTipIcon.Warning);
+        }
+
+        private void OnForegroundAllowedChanged(bool allowed)
+        {
+            Dispatcher.Invoke(async () =>
+            {
+                if (allowed)
+                {
+                    _lastUsage = await FetchUsageAsync();
+                    _hud.ApplyData(_lastUsage);
+                    UpdateTrayTooltip(_lastUsage);
+                    _hud.Show();
+                }
+                else
+                {
+                    _hud.Hide();
+                }
+            });
+        }
+
+        private void OnUsageFileChanged()
+        {
+            Dispatcher.Invoke(async () => await RefreshUsageAsync());
+        }
+
+        private void SetupNotifyIcon()
+        {
+            _notifyIcon = new NotifyIcon
+            {
+                Icon = CreateClaudeIcon(Color.FromArgb(217, 119, 6)),
+                Text = "Claude Usage Tracker (Đang theo dõi)",
+                Visible = true
+            };
+
+            var contextMenu = new ContextMenuStrip();
+            contextMenu.Items.Add("📊 Bảng Usage (HUD)", null, (s, e) => ToggleHud());
+            contextMenu.Items.Add("📈 Thống kê", null, (s, e) => OpenStats());
+            contextMenu.Items.Add("🔄 Làm mới Usage", null, async (s, e) => await RefreshUsageAsync(showFeedback: true));
+            contextMenu.Items.Add(new ToolStripSeparator());
+            contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
+            contextMenu.Items.Add("❌ Thoát", null, (s, e) => ExitApplication());
+
+            _notifyIcon.ContextMenuStrip = contextMenu;
+            _notifyIcon.MouseClick += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Left) ToggleHud();
+            };
+        }
+
+        private Icon CreateClaudeIcon(Color bg)
+        {
+            try
+            {
+                using var bmp = new Bitmap(32, 32);
+                using var g = Graphics.FromImage(bmp);
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                using var bgBrush = new SolidBrush(bg);
+                g.FillEllipse(bgBrush, 2, 2, 28, 28);
+                using var textBrush = new SolidBrush(Color.White);
+                using var font = new Font("Segoe UI", 14, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
+                g.DrawString("C", font, textBrush, 9, 7);
+                var hIcon = bmp.GetHicon();
+                return Icon.FromHandle(hIcon);
+            }
+            catch
+            {
+                return SystemIcons.Application;
+            }
+        }
+
+        private static Color ColorFromHex(string hex) =>
+            (Color)System.Drawing.ColorTranslator.FromHtml(hex);
+
+        private void OnClaudeLaunched()
+        {
+            Dispatcher.Invoke(async () =>
+            {
+                _lastUsage = await FetchUsageAsync();
+                UpdateTrayTooltip(_lastUsage);
+
+                // Step 1: Toast Notification 5s
+                var toast = new ToastNotificationWindow(_lastUsage, () =>
+                {
+                    // Step 2: Show Mini HUD Window
+                    _hud.ApplyData(_lastUsage);
+                    _hud.Show();
+                    _hud.Activate();
+                });
+                toast.Show();
+            });
+        }
+
+        private void ToggleHud()
+        {
+            Dispatcher.Invoke(async () =>
+            {
+                if (_hud.IsVisible)
+                {
+                    _hud.Hide();
+                    return;
+                }
+
+                _lastUsage ??= await FetchUsageAsync();
+                _hud.ApplyData(_lastUsage);
+                _hud.Show();
+                _hud.Activate();
+            });
+        }
+
+        private void OpenStats()
+        {
+            Dispatcher.Invoke(async () =>
+            {
+                if (_statsWindow != null)
+                {
+                    _statsWindow.Activate();
+                    return;
+                }
+
+                _lastUsage ??= await FetchUsageAsync();
+                _statsWindow = new StatsWindow(_insights.BuildSnapshot(_lastUsage), _lastUsage);
+                _statsWindow.Closed += (s, e) => _statsWindow = null;
+                _statsWindow.Show();
+                _statsWindow.Activate();
+            });
+        }
+
+        private async Task RefreshUsageAsync(bool showFeedback = false)
+        {
+            var previousSnapshot = _lastUsage?.LastRefreshedAt;
+
+            _lastUsage = await FetchUsageAsync();
+            UpdateTrayTooltip(_lastUsage);
+            if (_hud.IsVisible)
+            {
+                _hud.ApplyData(_lastUsage);
+            }
+
+            if (showFeedback && _notifyIcon != null)
+            {
+                // Làm mới chỉ đọc lại file; nói rõ có ảnh chụp mới hay chưa.
+                bool gotNewer = previousSnapshot == null || _lastUsage.LastRefreshedAt > previousSnapshot;
+                string title = gotNewer
+                    ? $"Có số mới · {_lastUsage.PercentUsed:0}%"
+                    : $"Chưa có số mới · vẫn {_lastUsage.PercentUsed:0}%";
+                _notifyIcon.ShowBalloonTip(2500, title, _lastUsage.Note, ToolTipIcon.Info);
+            }
+        }
+
+        private void UpdateTrayTooltip(UsageInfo info)
+        {
+            if (_notifyIcon != null)
+            {
+                string tip = $"Claude: {info.PercentUsed:0}% | {info.MessagesRemaining}";
+                if (tip.Length > 63) tip = tip.Substring(0, 60) + "...";
+                _notifyIcon.Text = tip;
+
+                // Đẩy màu icon lên một mức khi có cảnh báo đang tồn tại (dự báo cạn quota, ngữ cảnh phình to).
+                string hex = info.StatusColorHex;
+                if (info.ConditionLevel == AlertLevel.Critical) hex = "#EF4444";
+                else if (info.ConditionLevel == AlertLevel.Warn && hex == "#10B981") hex = "#F59E0B";
+
+                var oldIcon = _notifyIcon.Icon;
+                _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex));
+                oldIcon?.Dispose();
+            }
+        }
+
+        private void OpenSettings()
+        {
+            var settings = new SettingsWindow(_config);
+            if (settings.ShowDialog() == true)
+            {
+                ConfigService.Save(_config);
+                _ = RefreshUsageAsync();
+            }
+        }
+
+        private void ExitApplication()
+        {
+            _watcherService.Dispose();
+            _fileWatcherService.Dispose();
+            _foregroundWatcher.Dispose();
+            _statsWindow?.Close();
+            if (_hud != null)
+            {
+                _hud.AllowRealClose = true;
+                _hud.Close();
+            }
+            if (_notifyIcon != null)
+            {
+                _notifyIcon.Visible = false;
+                _notifyIcon.Dispose();
+            }
+            Shutdown();
+        }
+
+        protected override void OnExit(ExitEventArgs e)
+        {
+            ExitApplication();
+            base.OnExit(e);
+        }
+    }
+}

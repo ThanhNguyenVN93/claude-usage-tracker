@@ -1,0 +1,17 @@
+# Build output
+bin/
+obj/
+csharp/bin/
+csharp/obj/
+csharp/SelfTest/bin/
+csharp/SelfTest/obj/
+
+# Local tooling caches
+.dotnet/
+.appdata/
+.vs/
+*.user
+
+# Local runtime config / data
+config.json
+*.log

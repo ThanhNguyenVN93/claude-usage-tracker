@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net11.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Models\UsageSample.cs" />
+    <Compile Include="..\Services\TrackerPaths.cs" />
+    <Compile Include="..\Services\HistoryService.cs" />
+    <Compile Include="..\Services\StatsService.cs" />
+    <Compile Include="..\Services\AlertService.cs" />
+  </ItemGroup>
+
+</Project>
