@@ -470,20 +470,31 @@ namespace ClaudeUsageTracker
                 return;
             }
 
+            // DLL của self-contained app bị lock bởi process đang chạy — không thể overwrite in-place.
+            // Thay vào đó: copy toàn bộ file sang folder mới, restart từ đó.
+            string stagedDir = Path.GetDirectoryName(stagedExe)!;
+            string installDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+                "ClaudeUsageTracker",
+                $"app-{release.Tag}");
             try
             {
-                UpdateLogic.SwapExecutable(exePath, stagedExe);
+                if (Directory.Exists(installDir)) Directory.Delete(installDir, true);
+                Directory.CreateDirectory(installDir);
+                foreach (var file in Directory.EnumerateFiles(stagedDir))
+                    File.Copy(file, Path.Combine(installDir, Path.GetFileName(file)), overwrite: true);
             }
             catch (Exception ex)
             {
-                MessageBox.Show($"Không thay được file:\n{ex.Message}\n\nBản đang chạy không bị thay đổi.",
+                MessageBox.Show($"Không copy được bản mới:\n{ex.Message}\n\nBản đang chạy không bị thay đổi.",
                     "Cập nhật thất bại", MessageBoxButton.OK, MessageBoxImage.Warning);
                 return;
             }
 
-            try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(stagedExe))!, true); } catch { /* dọn tạm */ }
+            try { Directory.Delete(Path.GetDirectoryName(stagedDir)!, true); } catch { /* dọn tạm */ }
 
-            Process.Start(new ProcessStartInfo(exePath) { UseShellExecute = true });
+            string newExe = Path.Combine(installDir, UpdateLogic.ExeName);
+            Process.Start(new ProcessStartInfo(newExe) { UseShellExecute = true });
             ExitApplication();
         }
 
