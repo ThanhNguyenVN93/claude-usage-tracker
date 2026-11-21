@@ -13,6 +13,8 @@
     <Compile Include="..\Services\HistoryService.cs" />
     <Compile Include="..\Services\StatsService.cs" />
     <Compile Include="..\Services\AlertService.cs" />
+    <Compile Include="..\Services\UpdateService.cs" />
+    <Compile Include="..\Services\ErrorLog.cs" />
     <Compile Include="..\Services\ModelSwitchEngine.cs" />
     <Compile Include="..\Services\ClaudeSettingsFile.cs" />
     <Compile Include="..\Services\ModelSwitchService.cs" />

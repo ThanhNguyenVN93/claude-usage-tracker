@@ -49,8 +49,19 @@ namespace ClaudeUsageTracker.Views
                 DrawChart();
             };
 
-            // Giống toast: tự đóng khi người dùng bấm sang chỗ khác.
-            Deactivated += (s, e) => Close();
+            // Giống toast: tự đóng khi người dùng bấm sang chỗ khác. Phải chặn gọi Close() lần hai:
+            // bấm ✕ cũng làm cửa sổ mất focus ngay trong lúc đang đóng, và Close() lúc đó sẽ ném
+            // InvalidOperationException (đã từng làm sập cả tool).
+            bool closing = false;
+            Closing += (s, e) => closing = true;
+            Deactivated += (s, e) =>
+            {
+                if (closing) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!closing && IsLoaded) Close();
+                }));
+            };
         }
 
         private static SolidColorBrush Brush(string hex) =>

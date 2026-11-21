@@ -15,6 +15,8 @@ namespace ClaudeUsageTracker.Services
         public bool EnableEstimate { get; set; } = true;
         public double DivergenceThreshold { get; set; } = 4;
         public bool EnableResetReminder { get; set; } = true;
+        // Chỉ kiểm tra và thông báo; tải về luôn phải hỏi người dùng trước.
+        public bool EnableUpdateCheck { get; set; } = true;
         // Sửa cấu hình của app khác (Claude Code) nên mặc định TẮT.
         public bool EnableAutoModel { get; set; } = false;
         public double AutoModelSonnetAt { get; set; } = 85;

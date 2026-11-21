@@ -60,6 +60,8 @@
 
             <CheckBox x:Name="ChkResetReminder" Content="Nhắc khi hạn ngạch đã reset sau lúc chạm trần" Foreground="#CDD6F4" FontSize="11" Margin="0,12,0,0"/>
 
+            <CheckBox x:Name="ChkUpdateCheck" Content="Tự kiểm tra bản mới trên GitHub (chỉ thông báo, hỏi trước khi tải)" Foreground="#CDD6F4" FontSize="11" Margin="0,12,0,0"/>
+
             <Rectangle Height="1" Fill="#313244" Margin="0,14"/>
 
             <TextBlock Text="Bù độ trễ dữ liệu" FontSize="11" FontWeight="Bold" Foreground="#CDD6F4" Margin="0,0,0,8"/>

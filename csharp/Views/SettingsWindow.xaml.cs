@@ -32,6 +32,7 @@ namespace ClaudeUsageTracker.Views
             TxtThresholds.Text = _config.AlertThresholds;
             TxtContextWarn.Text = _config.ContextWarnPercent.ToString("0");
             ChkResetReminder.IsChecked = _config.EnableResetReminder;
+            ChkUpdateCheck.IsChecked = _config.EnableUpdateCheck;
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
             TxtDivergence.Text = _config.DivergenceThreshold.ToString("0.#");
@@ -86,6 +87,7 @@ namespace ClaudeUsageTracker.Views
             }
 
             _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
+            _config.EnableUpdateCheck = ChkUpdateCheck.IsChecked == true;
             _config.EnableEstimate = ChkEstimate.IsChecked == true;
 
             if (double.TryParse(TxtDivergence.Text, out double divergence) && divergence is > 0 and <= 100)
