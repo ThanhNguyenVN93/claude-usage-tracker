@@ -78,6 +78,38 @@ Console.WriteLine("StatsService.ComputeProjection");
     Check("đã 100%: báo đã chạm trần", StatsService.ComputeProjection(full, now, reset).Text.Contains("chạm trần"));
 }
 
+Console.WriteLine("StatsService.EstimateNow");
+{
+    var reset = now.AddHours(2);
+
+    // 5% mỗi 15 phút = 20%/giờ, mẫu cuối cũ 10 phút => +3.3 điểm
+    var steady = new List<UsageSample> { S(40, 10), S(25, 15), S(10, 20) };
+    var e = StatsService.EstimateNow(steady, now, reset);
+    Check("nhịp đều: có ước tính ≈ 23.3%", e != null && Math.Abs(e.Value - 23.33) < 0.5, $"(got {e?.Value})");
+    Check("delta ≈ 3.3 điểm", e != null && Math.Abs(e.Delta - 3.33) < 0.5);
+
+    var fresh = new List<UsageSample> { S(41, 10), S(26, 15), S(1, 20) };
+    Check("mẫu mới (<2 phút): không cần ước tính", StatsService.EstimateNow(fresh, now, reset) == null);
+
+    var stale = new List<UsageSample> { S(70, 10), S(55, 15), S(30, 20) };
+    Check("mẫu quá cũ (>20 phút): không ước tính", StatsService.EstimateNow(stale, now, reset) == null);
+
+    var idle = new List<UsageSample> { S(60, 10), S(45, 20), S(30, 30), S(15, 30) };
+    Check("vừa nghỉ sau đợt dùng mạnh: không ước tính", StatsService.EstimateNow(idle, now, reset) == null);
+
+    var fast = new List<UsageSample> { S(45, 10), S(30, 40), S(15, 70) }; // 120%/giờ
+    var ef = StatsService.EstimateNow(fast, now, reset);
+    Check("nhịp rất nhanh: chặn trần +10 điểm", ef != null && Math.Abs(ef.Delta - 10) < 1e-9 && Math.Abs(ef.Value - 80) < 1e-9, $"(got {ef?.Delta})");
+
+    Check("đã qua giờ reset: không ước tính", StatsService.EstimateNow(steady, now, now.AddMinutes(-1)) == null);
+    Check("đã 100%: không ước tính", StatsService.EstimateNow(new List<UsageSample> { S(30, 98), S(12, 100) }, now, reset) == null);
+    Check("quá ít mẫu: không ước tính", StatsService.EstimateNow(new List<UsageSample> { S(10, 20) }, now, reset) == null);
+
+    var nearCap = new List<UsageSample> { S(45, 60), S(30, 75), S(10, 92) }; // ~ 40%/giờ
+    var en = StatsService.EstimateNow(nearCap, now, reset);
+    Check("không bao giờ vượt 100%", en == null || en.Value <= 100);
+}
+
 Console.WriteLine("AlertEngine");
 {
     var cfg = new AlertConfig();

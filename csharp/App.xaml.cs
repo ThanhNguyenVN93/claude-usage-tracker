@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Drawing;
 using System.Linq;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
@@ -25,6 +26,11 @@ namespace ClaudeUsageTracker
         private MiniHudWindow _hud = null!;
         private StatsWindow? _statsWindow;
         private UsageInfo? _lastUsage;
+        private System.Windows.Threading.DispatcherTimer? _tick;
+        private string? _lastIconHex;
+
+        [DllImport("user32.dll", SetLastError = true)]
+        private static extern bool DestroyIcon(IntPtr hIcon);
 
         protected override async void OnStartup(StartupEventArgs e)
         {
@@ -53,6 +59,12 @@ namespace ClaudeUsageTracker
 
             _foregroundWatcher.ForegroundAllowedChanged += OnForegroundAllowedChanged;
             _foregroundWatcher.Start();
+
+            // Làm mới định kỳ để tuổi dữ liệu, cảnh báo "cũ" và ước tính tự cập nhật
+            // ngay cả khi file nguồn ngừng đổi (watcher chỉ chạy khi file thay đổi).
+            _tick = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(30) };
+            _tick.Tick += async (s, ev) => await RefreshUsageAsync();
+            _tick.Start();
         }
 
         // Đọc usage, gắn dự báo/mức cảnh báo, và bắn cảnh báo mới (nếu có).
@@ -137,7 +149,16 @@ namespace ClaudeUsageTracker
                 using var font = new Font("Segoe UI", 14, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
                 g.DrawString("C", font, textBrush, 9, 7);
                 var hIcon = bmp.GetHicon();
-                return Icon.FromHandle(hIcon);
+                try
+                {
+                    // Clone rồi huỷ HICON gốc, nếu không mỗi lần đổi icon sẽ rò rỉ một GDI handle.
+                    using var tmp = Icon.FromHandle(hIcon);
+                    return (Icon)tmp.Clone();
+                }
+                finally
+                {
+                    DestroyIcon(hIcon);
+                }
             }
             catch
             {
@@ -237,9 +258,13 @@ namespace ClaudeUsageTracker
                 if (info.ConditionLevel == AlertLevel.Critical) hex = "#EF4444";
                 else if (info.ConditionLevel == AlertLevel.Warn && hex == "#10B981") hex = "#F59E0B";
 
-                var oldIcon = _notifyIcon.Icon;
-                _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex));
-                oldIcon?.Dispose();
+                if (hex != _lastIconHex)
+                {
+                    _lastIconHex = hex;
+                    var oldIcon = _notifyIcon.Icon;
+                    _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex));
+                    oldIcon?.Dispose();
+                }
             }
         }
 
@@ -255,6 +280,7 @@ namespace ClaudeUsageTracker
 
         private void ExitApplication()
         {
+            _tick?.Stop();
             _watcherService.Dispose();
             _fileWatcherService.Dispose();
             _foregroundWatcher.Dispose();

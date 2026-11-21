@@ -37,6 +37,14 @@ namespace ClaudeUsageTracker.Services
 
                 if (chosen != null)
                 {
+                    var other = ReferenceEquals(chosen, cliInfo) ? desktopInfo : cliInfo;
+                    if (other != null)
+                    {
+                        chosen.OtherSourcePercent = other.PercentUsed;
+                        chosen.OtherSourceLabel = other.SourceLabel;
+                        chosen.OtherSourceTime = other.LastRefreshedAt;
+                    }
+
                     // Mốc reset là thời điểm tuyệt đối: file CLI dù cũ vẫn cho giờ reset
                     // đúng, miễn mốc đó chưa trôi qua.
                     ApplyCliResetTimes(chosen);
@@ -155,6 +163,7 @@ namespace ClaudeUsageTracker.Services
 
             return new UsageInfo
             {
+                SourceLabel = "CLI",
                 AccountName = "Claude Code (CLI)",
                 Tier = "Dữ liệu từ statusline",
                 PercentUsed = fiveHour,
@@ -223,6 +232,7 @@ namespace ClaudeUsageTracker.Services
 
             return new UsageInfo
             {
+                SourceLabel = "Desktop",
                 AccountName = "Claude Desktop",
                 Tier = "Dữ liệu cục bộ",
                 PercentUsed = fiveHour,

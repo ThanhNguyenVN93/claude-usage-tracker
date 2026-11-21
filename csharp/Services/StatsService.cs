@@ -22,6 +22,8 @@ namespace ClaudeUsageTracker.Services
 
     public record SeriesPoint(DateTime Time, double Value);
 
+    public record Estimate(double Value, double Delta, TimeSpan SampleAge);
+
     // Logic thuần (không WPF, không IO) để dễ kiểm thử.
     public static class StatsService
     {
@@ -69,17 +71,9 @@ namespace ClaudeUsageTracker.Services
         {
             var look = lookback ?? TimeSpan.FromMinutes(60);
 
-            var recent = samples.Where(s => s.Time >= now - look && s.Time <= now).OrderBy(s => s.Time).ToList();
-            if (recent.Count == 0)
+            var run = LatestRun(samples, now, look);
+            if (run.Count == 0)
                 return None("Chưa có dữ liệu để dự báo");
-
-            // Chỉ giữ đoạn liên tục sau lần reset gần nhất (fh giảm).
-            int start = 0;
-            for (int i = 1; i < recent.Count; i++)
-            {
-                if (recent[i - 1].FiveHour - recent[i].FiveHour >= ResetDropThreshold) start = i;
-            }
-            var run = recent.Skip(start).ToList();
 
             var last = run[^1];
             if (last.FiveHour >= 100)
@@ -107,6 +101,54 @@ namespace ClaudeUsageTracker.Services
                 text = $"Nhịp {rate:0}%/giờ — ước chạm 100% lúc {hit:HH:mm}";
 
             return new Projection(true, hit, rate, before, margin, text);
+        }
+
+        // Đoạn mẫu liên tục sau lần reset gần nhất trong cửa sổ `look` (reset = % tụt ≥ ResetDropThreshold).
+        private static List<UsageSample> LatestRun(IReadOnlyList<UsageSample> samples, DateTime now, TimeSpan look)
+        {
+            var recent = samples.Where(s => s.Time >= now - look && s.Time <= now).OrderBy(s => s.Time).ToList();
+
+            int start = 0;
+            for (int i = 1; i < recent.Count; i++)
+            {
+                if (recent[i - 1].FiveHour - recent[i].FiveHour >= ResetDropThreshold) start = i;
+            }
+            return recent.Skip(start).ToList();
+        }
+
+        // Ước tính % 5h ngay lúc này khi mẫu cuối đã hơi cũ (nguồn chỉ ghi mỗi ~15 phút).
+        // Bảo thủ: nhịp = min(hồi quy 60 phút, nhịp 2 mẫu cuối), chỉ khi mẫu cuối cũ 2–20 phút,
+        // cộng tối đa MaxEstimateDelta điểm, và không ước tính qua giờ reset.
+        public const double MaxEstimateDelta = 10;
+        public static readonly TimeSpan MinEstimateAge = TimeSpan.FromMinutes(2);
+        public static readonly TimeSpan MaxEstimateAge = TimeSpan.FromMinutes(20);
+
+        public static Estimate? EstimateNow(IReadOnlyList<UsageSample> samples, DateTime now, DateTime? resetTime)
+        {
+            var run = LatestRun(samples, now, TimeSpan.FromMinutes(60));
+            if (run.Count < 2) return null;
+
+            var last = run[^1];
+            var prev = run[^2];
+            var age = now - last.Time;
+
+            if (age < MinEstimateAge || age > MaxEstimateAge) return null;
+            if (last.FiveHour >= 100) return null;
+            if (resetTime.HasValue && resetTime.Value <= now) return null;
+            if ((last.Time - run[0].Time) < TimeSpan.FromMinutes(10)) return null;
+
+            double lastGapHours = (last.Time - prev.Time).TotalHours;
+            if (lastGapHours <= 0) return null;
+
+            double regression = RegressionSlopePerHour(run);
+            double recentRate = (last.FiveHour - prev.FiveHour) / lastGapHours;
+            double rate = Math.Min(regression, recentRate);
+            if (rate < 0.5) return null;
+
+            double delta = Math.Min(rate * age.TotalHours, MaxEstimateDelta);
+            if (delta < 0.5) return null;
+
+            return new Estimate(Math.Min(100, last.FiveHour + delta), delta, age);
         }
 
         public static IReadOnlyList<SeriesPoint> BuildSeries(

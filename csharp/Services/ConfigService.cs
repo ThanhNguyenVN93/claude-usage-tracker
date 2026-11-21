@@ -12,6 +12,13 @@ namespace ClaudeUsageTracker.Services
         public string AlertThresholds { get; set; } = "80,95";
         public double ContextWarnPercent { get; set; } = 70;
         public int HistoryRetentionDays { get; set; } = 30;
+        public bool EnableEstimate { get; set; } = true;
+        public double DivergenceThreshold { get; set; } = 4;
+        public bool EnableResetReminder { get; set; } = true;
+        // Sửa cấu hình của app khác (Claude Code) nên mặc định TẮT.
+        public bool EnableAutoModel { get; set; } = false;
+        public double AutoModelSonnetAt { get; set; } = 85;
+        public double AutoModelHaikuAt { get; set; } = 95;
     }
 
     public static class ConfigService
