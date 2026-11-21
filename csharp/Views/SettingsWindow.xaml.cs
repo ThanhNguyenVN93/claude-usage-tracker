@@ -31,6 +31,17 @@ namespace ClaudeUsageTracker.Views
             ChkAlerts.IsChecked = _config.EnableAlerts;
             TxtThresholds.Text = _config.AlertThresholds;
             TxtContextWarn.Text = _config.ContextWarnPercent.ToString("0");
+            ChkResetReminder.IsChecked = _config.EnableResetReminder;
+
+            ChkEstimate.IsChecked = _config.EnableEstimate;
+            TxtDivergence.Text = _config.DivergenceThreshold.ToString("0.#");
+
+            ChkAutoModel.IsChecked = _config.EnableAutoModel;
+            TxtSonnetAt.Text = _config.AutoModelSonnetAt.ToString("0");
+            TxtHaikuAt.Text = _config.AutoModelHaikuAt.ToString("0");
+
+            var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version;
+            TxtVersion.Text = $"Phiên bản {version?.ToString(3) ?? "?"} · nguồn dữ liệu usage và tuỳ chọn chạy nền";
         }
 
         private void SetPathStatus(System.Windows.Controls.TextBox pathBox, System.Windows.Controls.TextBlock statusBlock,
@@ -72,6 +83,24 @@ namespace ClaudeUsageTracker.Views
             if (double.TryParse(TxtContextWarn.Text, out double ctxWarn) && ctxWarn is > 0 and <= 100)
             {
                 _config.ContextWarnPercent = ctxWarn;
+            }
+
+            _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
+            _config.EnableEstimate = ChkEstimate.IsChecked == true;
+
+            if (double.TryParse(TxtDivergence.Text, out double divergence) && divergence is > 0 and <= 100)
+            {
+                _config.DivergenceThreshold = divergence;
+            }
+
+            _config.EnableAutoModel = ChkAutoModel.IsChecked == true;
+
+            // Ngưỡng Haiku phải cao hơn ngưỡng Sonnet, nếu không thì giữ giá trị cũ.
+            if (double.TryParse(TxtSonnetAt.Text, out double sonnetAt) && double.TryParse(TxtHaikuAt.Text, out double haikuAt)
+                && sonnetAt is > 0 and < 100 && haikuAt is > 0 and <= 100 && haikuAt > sonnetAt)
+            {
+                _config.AutoModelSonnetAt = sonnetAt;
+                _config.AutoModelHaikuAt = haikuAt;
             }
 
             DialogResult = true;

@@ -6,7 +6,7 @@ using System.Text.Json;
 
 namespace ClaudeUsageTracker.Services
 {
-    public enum AlertLevel { None = 0, Warn = 1, Critical = 2 }
+    public enum AlertLevel { None = 0, Info = 1, Warn = 2, Critical = 3 }
 
     public record Alert(string Title, string Message, AlertLevel Level);
 
@@ -15,6 +15,7 @@ namespace ClaudeUsageTracker.Services
         public bool Enabled { get; set; } = true;
         public int[] Thresholds { get; set; } = { 80, 95 };
         public double ContextWarnPercent { get; set; } = 70;
+        public bool ResetReminder { get; set; } = true;
     }
 
     public record AlertInput(
@@ -37,6 +38,8 @@ namespace ClaudeUsageTracker.Services
         private const double ReArmMargin = 5;          // % phải tụt xuống dưới ngưỡng bao nhiêu mới báo lại
         private const double ContextReArmMargin = 15;  // sau /compact ngữ cảnh tụt mạnh
         private static readonly TimeSpan ProjectionCooldown = TimeSpan.FromMinutes(30);
+        private const double HitLimitAt = 95;       // coi là đã chạm trần từ mức này
+        private const double ResetBelow = 50;       // sau khi chạm trần mà tụt dưới mức này => đã reset
         private const int MaxStateKeys = 100;
 
         public static List<Alert> Evaluate(AlertInput input, AlertConfig cfg, AlertState state)
@@ -47,6 +50,13 @@ namespace ClaudeUsageTracker.Services
             EvaluateQuota("fh", "Chu kỳ 5 giờ", input.FiveHour, cfg.Thresholds, input.Now, state, alerts);
             if (input.SevenDay.HasValue)
                 EvaluateQuota("sd", "Hạn ngạch tuần", input.SevenDay.Value, cfg.Thresholds, input.Now, state, alerts);
+
+            if (cfg.ResetReminder)
+            {
+                EvaluateResetReminder("fh", "Chu kỳ 5 giờ", input.FiveHour, input.Now, state, alerts);
+                if (input.SevenDay.HasValue)
+                    EvaluateResetReminder("sd", "Hạn ngạch tuần", input.SevenDay.Value, input.Now, state, alerts);
+            }
 
             EvaluateProjection(input, state, alerts);
             EvaluateContext(input, cfg, state, alerts);
@@ -83,6 +93,29 @@ namespace ClaudeUsageTracker.Services
             {
                 var level = crossed.Value >= 95 ? AlertLevel.Critical : AlertLevel.Warn;
                 alerts.Add(new Alert($"{label}: {value:0}%", $"Đã vượt mốc {crossed.Value}%.", level));
+            }
+        }
+
+        // Nhắc một lần khi hạn ngạch đã reset sau lúc người dùng chạm trần ("quay lại làm tiếp").
+        // Chỉ nhắc, không tự chạy lệnh Claude nào.
+        private static void EvaluateResetReminder(string prefix, string label, double value,
+            DateTime now, AlertState state, List<Alert> alerts)
+        {
+            string key = $"hitlimit:{prefix}";
+
+            if (value >= HitLimitAt)
+            {
+                if (!state.Fired.ContainsKey(key)) state.Fired[key] = now;
+                return;
+            }
+
+            if (state.Fired.ContainsKey(key) && value < ResetBelow)
+            {
+                state.Fired.Remove(key);
+                alerts.Add(new Alert(
+                    $"{label} đã reset",
+                    $"Hạn ngạch đã về {value:0}% — quay lại làm tiếp được rồi.",
+                    AlertLevel.Info));
             }
         }
 

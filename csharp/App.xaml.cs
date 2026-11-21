@@ -20,6 +20,7 @@ namespace ClaudeUsageTracker
         private AppConfig _config = null!;
         private ClaudeUsageService _usageService = null!;
         private InsightsService _insights = null!;
+        private ModelSwitchService _modelSwitch = null!;
         private ProcessWatcherService _watcherService = null!;
         private UsageFileWatcherService _fileWatcherService = null!;
         private ForegroundAppWatcherService _foregroundWatcher = null!;
@@ -40,6 +41,7 @@ namespace ClaudeUsageTracker
             _usageService = new ClaudeUsageService();
             _insights = new InsightsService(new HistoryService(), _config);
             _insights.PruneHistory();
+            _modelSwitch = new ModelSwitchService(_config);
             _watcherService = new ProcessWatcherService(_config.CheckIntervalSeconds);
             _fileWatcherService = new UsageFileWatcherService();
             _foregroundWatcher = new ForegroundAppWatcherService();
@@ -72,6 +74,8 @@ namespace ClaudeUsageTracker
         {
             var info = await _usageService.GetUsageAsync(_config);
             var alerts = _insights.Process(info);
+            var switched = _modelSwitch.Evaluate(info);
+            if (switched != null) alerts.Add(switched);
             if (alerts.Count > 0) NotifyAlerts(alerts);
             return info;
         }
@@ -86,7 +90,9 @@ namespace ClaudeUsageTracker
 
             _notifyIcon.ShowBalloonTip(
                 8000, title, message,
-                level == AlertLevel.Critical ? ToolTipIcon.Error : ToolTipIcon.Warning);
+                level == AlertLevel.Critical ? ToolTipIcon.Error
+                : level == AlertLevel.Warn ? ToolTipIcon.Warning
+                : ToolTipIcon.Info);
         }
 
         private void OnForegroundAllowedChanged(bool allowed)

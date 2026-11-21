@@ -13,6 +13,11 @@
     <Compile Include="..\Services\HistoryService.cs" />
     <Compile Include="..\Services\StatsService.cs" />
     <Compile Include="..\Services\AlertService.cs" />
+    <Compile Include="..\Services\ModelSwitchEngine.cs" />
+    <Compile Include="..\Services\ClaudeSettingsFile.cs" />
+    <Compile Include="..\Services\ModelSwitchService.cs" />
+    <Compile Include="..\Services\ConfigService.cs" />
+    <Compile Include="..\Models\UsageInfo.cs" />
   </ItemGroup>
 
 </Project>

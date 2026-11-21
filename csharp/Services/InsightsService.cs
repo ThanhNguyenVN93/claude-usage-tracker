@@ -117,7 +117,8 @@ namespace ClaudeUsageTracker.Services
             {
                 Enabled = _config.EnableAlerts,
                 Thresholds = thresholds.Length > 0 ? thresholds : new[] { 80, 95 },
-                ContextWarnPercent = _config.ContextWarnPercent
+                ContextWarnPercent = _config.ContextWarnPercent,
+                ResetReminder = _config.EnableResetReminder
             };
         }
 

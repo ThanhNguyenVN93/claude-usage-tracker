@@ -21,6 +21,9 @@ Tool lấy **% từ nguồn mới nhất** và mượn **giờ reset** từ file
 - **Icon tray đổi màu** theo mức dùng (xanh / vàng / đỏ), và được đẩy lên một mức khi có cảnh báo đang tồn tại.
 - **Dự báo**: "với nhịp 30%/giờ sẽ chạm 100% lúc 17:12 — trước giờ reset 25m".
 - **Cảnh báo** (balloon tip): vượt ngưỡng 5h/tuần (mặc định 80%, 95%), dự báo chạm trần trước reset, ngữ cảnh phiên ≥ 70%. Mỗi cảnh báo chỉ bắn một lần, trạng thái lưu ở `alert-state.json` nên không báo lặp sau khi restart.
+- **Bù độ trễ dữ liệu** (hai cách làm fallback cho nhau): HUD hiện thêm dòng `≈ 61% ước tính hiện tại (+4% sau 12 phút)` (nhịp bảo thủ, tối đa +10 điểm, không vượt giờ reset; số lớn vẫn là số thật). Nếu Desktop và CLI **lệch nhau** từ 4 điểm trở lên thì cảnh báo và không ước tính. HUD tự làm mới mỗi 30 giây nên "tuổi dữ liệu" luôn đúng dù file nguồn ngừng đổi.
+- **Nhắc khi đã reset**: sau khi chạm trần (≥95%) rồi hạn ngạch reset, hiện một balloon "quay lại làm tiếp được rồi". Chỉ nhắc, không tự chạy lệnh Claude nào.
+- **Tự đổi model mặc định** (mặc định **TẮT**, bật trong Cài đặt): khi quota 5h/tuần ≥ 85% đặt `model` = `sonnet`, ≥ 95% = `haiku` trong `~/.claude/settings.json`, và khôi phục khi quota hạ. **Chỉ áp dụng cho phiên mới** (phiên đang chạy phải dùng `/model`). Có sao lưu `settings.json.tracker.bak`, giữ nguyên mọi khoá khác, không đè nếu bạn tự đổi model giữa chừng, và không ghi nếu file không phải JSON hợp lệ.
 - **📈 Thống kê** (nút trong HUD / menu tray): model nào đốt quota (ước lượng, 24h / 7 ngày), dự báo, ngữ cảnh phiên, biểu đồ lịch sử 24h / 7 ngày.
 - **Cài đặt**: trạng thái 2 nguồn dữ liệu, chu kỳ quét, ngưỡng "dữ liệu cũ", khởi động cùng Windows, bật/tắt cảnh báo và ngưỡng.
 
@@ -70,9 +73,9 @@ python/                  Bản thử nghiệm cũ, không còn được cập nh
 dotnet run --project csharp/SelfTest
 ```
 
-Chạy các ca cho thống kê theo model, dự báo (kể cả nhiễu ±1% giữa 2 nguồn và qua lần reset), cảnh báo không báo lặp, và gộp lịch sử.
+Chạy các ca cho thống kê theo model, dự báo và ước tính (kể cả nhiễu ±1% giữa 2 nguồn và qua lần reset), cảnh báo không báo lặp, nhắc reset, gộp lịch sử, và tự đổi model (không đè khi người dùng tự đổi, giữ nguyên các khoá khác, không ghi đè file hỏng).
 
-Biến môi trường để thử mà không đụng dữ liệu thật: `CLAUDE_USAGE_TRACKER_DIR` (thư mục dữ liệu của tool, dùng cho cả `statusline.js`) và `CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY` (đường dẫn thay cho file Desktop).
+Biến môi trường để thử mà không đụng dữ liệu thật: `CLAUDE_USAGE_TRACKER_DIR` (thư mục dữ liệu của tool, dùng cho cả `statusline.js`), `CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY` (thay cho file Desktop) và `CLAUDE_USAGE_TRACKER_SETTINGS` (thay cho `~/.claude/settings.json` khi thử tính năng tự đổi model).
 
 ## Lưu ý về thống kê model
 
