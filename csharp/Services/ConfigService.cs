@@ -6,6 +6,9 @@ namespace ClaudeUsageTracker.Services
 {
     public class AppConfig
     {
+        // sessionKey từ cookie claude.ai (sk-ant-sid...) — dùng để sync quota thời gian thực
+        public string SessionKey { get; set; } = string.Empty;
+        public int ApiSyncIntervalSeconds { get; set; } = 300;
         public int CheckIntervalSeconds { get; set; } = 2;
         public int StaleThresholdMinutes { get; set; } = 15;
         public bool EnableAlerts { get; set; } = true;

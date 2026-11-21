@@ -21,6 +21,7 @@ namespace ClaudeUsageTracker
         private NotifyIcon? _notifyIcon;
         private AppConfig _config = null!;
         private ClaudeUsageService _usageService = null!;
+        private ClaudeApiSyncService _apiSync = null!;
         private InsightsService _insights = null!;
         private ModelSwitchService _modelSwitch = null!;
         private ProcessWatcherService _watcherService = null!;
@@ -61,6 +62,7 @@ namespace ClaudeUsageTracker
 
             _config = ConfigService.Load();
             _usageService = new ClaudeUsageService();
+            _apiSync = new ClaudeApiSyncService();
             _insights = new InsightsService(new HistoryService(), _config);
             _insights.PruneHistory();
             _modelSwitch = new ModelSwitchService(_config);
@@ -72,6 +74,11 @@ namespace ClaudeUsageTracker
             _foregroundWatcher = new ForegroundAppWatcherService();
 
             SetupNotifyIcon();
+
+            // Sync quota từ Claude.ai API ngay khi khởi động (nếu có sessionKey),
+            // rồi chạy ngầm định kỳ theo ApiSyncIntervalSeconds.
+            await _apiSync.SyncOnceAsync(_config);
+            _apiSync.StartBackground(_config);
 
             _lastUsage = await FetchUsageAsync();
             _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, _config);
@@ -437,6 +444,9 @@ namespace ClaudeUsageTracker
             if (settings.ShowDialog() == true)
             {
                 ConfigService.Save(_config);
+                // Nếu vừa cấu hình SessionKey, sync API ngay lập tức
+                if (!string.IsNullOrWhiteSpace(_config.SessionKey))
+                    _ = _apiSync.SyncOnceAsync(_config);
                 _ = RefreshUsageAsync();
             }
         }
@@ -445,6 +455,7 @@ namespace ClaudeUsageTracker
         {
             _tick?.Stop();
             _updateTimer?.Stop();
+            _apiSync?.Dispose();
             _watcherService.Dispose();
             _fileWatcherService.Dispose();
             _foregroundWatcher.Dispose();

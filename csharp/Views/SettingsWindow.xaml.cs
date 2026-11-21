@@ -24,6 +24,16 @@ namespace ClaudeUsageTracker.Views
                 "✔ Đã tìm thấy dữ liệu từ statusline",
                 "✖ Chưa tìm thấy — hãy dùng Claude Code CLI ít nhất một lần (xem README)");
 
+            // SessionKey — dùng PasswordBox (tự che bằng •)
+            if (!string.IsNullOrWhiteSpace(_config.SessionKey))
+            {
+                PwdSessionKey.Password = _config.SessionKey;
+                TxtSessionKeyHint.Text = "✔ Đã cấu hình (để trống để xoá)";
+                TxtSessionKeyHint.Foreground = new SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0x10, 0xB9, 0x81));
+            }
+            TxtApiSyncInterval.Text = _config.ApiSyncIntervalSeconds.ToString();
+
             TxtInterval.Text = _config.CheckIntervalSeconds.ToString();
             TxtStaleMinutes.Text = _config.StaleThresholdMinutes.ToString();
             ChkAutoStart.IsChecked = AutoStartService.IsEnabled();
@@ -58,6 +68,14 @@ namespace ClaudeUsageTracker.Views
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
+            // SessionKey — chỉ ghi nếu hợp lệ hoặc xoá
+            string newKey = PwdSessionKey.Password.Trim();
+            if (newKey.StartsWith("sk-ant-") || string.IsNullOrEmpty(newKey))
+                _config.SessionKey = newKey;
+
+            if (int.TryParse(TxtApiSyncInterval.Text, out int apiInterval) && apiInterval >= 0)
+                _config.ApiSyncIntervalSeconds = apiInterval;
+
             if (int.TryParse(TxtInterval.Text, out int interval) && interval > 0)
             {
                 _config.CheckIntervalSeconds = interval;
