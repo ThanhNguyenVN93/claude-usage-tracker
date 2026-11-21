@@ -37,8 +37,8 @@ namespace ClaudeUsageTracker.Services
     {
         public const string ExeName = "ClaudeUsageTracker.exe";
         public const string SumsName = "SHA256SUMS.txt";
-        public const long MaxZipBytes = 50L * 1024 * 1024;
-        public const long MaxExeBytes = 50L * 1024 * 1024;
+        public const long MaxZipBytes  = 300L * 1024 * 1024;  // folder zip có thể ~200MB
+        public const long MaxExeBytes  = 300L * 1024 * 1024;
 
         private static readonly Regex TagRx = new(@"^v?(\d+)\.(\d+)\.(\d+)$", RegexOptions.Compiled);
         private static readonly Regex ZipRx = new(@"^ClaudeUsageTracker-v(\d+\.\d+\.\d+)-win-x64\.zip$", RegexOptions.Compiled);
@@ -121,40 +121,71 @@ namespace ClaudeUsageTracker.Services
             return string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase);
         }
 
-        // Chỉ lấy đúng một mục "ClaudeUsageTracker.exe" ở gốc zip; mọi mục khác (kể cả đường dẫn
-        // lạ như ../x.exe) đều bị bỏ qua nên không thể ghi ra ngoài thư mục đích.
+        // Extract toàn bộ nội dung zip vào destDir (với bảo vệ path traversal).
+        // Trả về đường dẫn tới ClaudeUsageTracker.exe trong destDir.
         public static string ExtractExe(string zipPath, string destDir)
         {
-            using var zip = ZipFile.OpenRead(zipPath);
-            var entry = zip.GetEntry(ExeName);
-            if (entry == null || entry.FullName != ExeName) throw new InvalidDataException("Zip không chứa ClaudeUsageTracker.exe ở gốc");
-            if (entry.Length <= 0 || entry.Length > MaxExeBytes) throw new InvalidDataException("Kích thước exe không hợp lệ");
-
             Directory.CreateDirectory(destDir);
-            string target = Path.Combine(destDir, ExeName);
+            string destFull = Path.GetFullPath(destDir);
 
-            using (var input = entry.Open())
-            using (var output = File.Create(target))
+            using var zip = ZipFile.OpenRead(zipPath);
+
+            bool exeFound = false;
+            foreach (var entry in zip.Entries)
             {
+                // Bỏ qua thư mục
+                if (string.IsNullOrEmpty(entry.Name)) continue;
+
+                // Chỉ lấy file ở gốc zip (không có sub-folder)
+                string name = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
+                if (name.Contains(Path.DirectorySeparatorChar)) continue;
+
+                // Bảo vệ path traversal
+                string dest = Path.GetFullPath(Path.Combine(destFull, entry.Name));
+                if (!dest.StartsWith(destFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException($"Path traversal bị chặn: {entry.FullName}");
+
+                if (entry.Length > MaxExeBytes) throw new InvalidDataException($"File quá lớn: {entry.Name}");
+
+                using var input = entry.Open();
+                using var output = File.Create(dest);
                 input.CopyTo(output);
+
+                if (entry.Name.Equals(ExeName, StringComparison.OrdinalIgnoreCase)) exeFound = true;
             }
 
-            using var fs = File.OpenRead(target);
+            if (!exeFound) throw new InvalidDataException("Zip không chứa ClaudeUsageTracker.exe ở gốc");
+
+            string exePath = Path.Combine(destFull, ExeName);
+            using var fs = File.OpenRead(exePath);
             if (fs.ReadByte() != 'M' || fs.ReadByte() != 'Z') throw new InvalidDataException("File không phải exe Windows");
-            return target;
+            return exePath;
         }
 
-        // Windows cho đổi tên exe đang chạy (nhưng không cho ghi đè/xoá): đổi tên bản cũ thành .old
-        // rồi chép bản mới vào đúng đường dẫn cũ. Lỗi giữa chừng thì hoàn tác.
+        // Windows cho đổi tên exe đang chạy (nhưng không cho ghi đè/xoá): đổi tên bản cũ thành .old,
+        // rồi copy toàn bộ file từ staged dir (DLL, exe, ...) sang thư mục hiện tại.
         public static void SwapExecutable(string currentPath, string stagedPath)
         {
-            string old = currentPath + ".old";
+            string appDir    = Path.GetFullPath(Path.GetDirectoryName(currentPath)!);
+            string stagedDir = Path.GetFullPath(Path.GetDirectoryName(stagedPath)!);
+            string old       = currentPath + ".old";
+
             try { if (File.Exists(old)) File.Delete(old); } catch { /* .old cũ còn bị khoá: bỏ qua */ }
 
+            // Đổi tên exe cũ → .old (không thể xoá exe đang chạy, nhưng rename được)
             File.Move(currentPath, old, overwrite: true);
             try
             {
+                // Copy exe mới trước (nếu lỗi thì rollback được)
                 File.Copy(stagedPath, currentPath, overwrite: false);
+
+                // Copy các file còn lại (DLL, v.v.) — overwrite vì chúng không bị khoá
+                foreach (var file in Directory.EnumerateFiles(stagedDir))
+                {
+                    string name = Path.GetFileName(file);
+                    if (name.Equals(ExeName, StringComparison.OrdinalIgnoreCase)) continue; // đã copy
+                    File.Copy(file, Path.Combine(appDir, name), overwrite: true);
+                }
             }
             catch
             {

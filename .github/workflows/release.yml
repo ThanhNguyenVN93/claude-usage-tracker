@@ -45,25 +45,30 @@ jobs:
             -c Release `
             -r win-x64 `
             --self-contained true `
-            -p:PublishSingleFile=true `
-            -p:IncludeNativeLibrariesForSelfExtract=true `
-            -p:EnableCompressionInSingleFile=true `
             -p:Version="${{ steps.ver.outputs.version }}" `
             -o publish
 
-      - name: Rename exe
+      - name: Rename exe + zip
         shell: pwsh
         run: |
+          # Đổi tên exe về tên cố định
           $exe = Get-ChildItem "csharp\publish\*.exe" | Select-Object -First 1
           $dest = "csharp\publish\ClaudeUsageTracker.exe"
           if ($exe.FullName -ne $dest) { Move-Item $exe.FullName $dest -Force }
+          # Xoá pdb — không cần cho runtime
+          Remove-Item "csharp\publish\*.pdb" -Force -ErrorAction SilentlyContinue
+          # Tên zip phải khớp ZipRx trong UpdateService.cs: ClaudeUsageTracker-v{ver}-win-x64.zip
+          $zipName = "ClaudeUsageTracker-v${{ steps.ver.outputs.version }}-win-x64.zip"
+          Compress-Archive -Path "csharp\publish\*" -DestinationPath $zipName
+          Write-Host "Zip: $zipName ($([Math]::Round((Get-Item $zipName).Length/1MB,1)) MB)"
 
-      # SHA-256 checksum — dùng để kiểm tra khi tự cập nhật
+      # SHA256SUMS.txt — phải khớp SumsName trong UpdateService.cs
       - name: Checksum
         shell: pwsh
         run: |
-          $hash = (Get-FileHash "csharp\publish\ClaudeUsageTracker.exe" -Algorithm SHA256).Hash.ToLower()
-          "$hash  ClaudeUsageTracker.exe" | Out-File -Encoding ascii "csharp\publish\ClaudeUsageTracker.exe.sha256"
+          $zipName = "ClaudeUsageTracker-v${{ steps.ver.outputs.version }}-win-x64.zip"
+          $hash = (Get-FileHash $zipName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $zipName" | Out-File -Encoding ascii "SHA256SUMS.txt"
           Write-Host "SHA256: $hash"
 
       # Lấy tag annotation hoặc commit message làm release notes
@@ -84,5 +89,5 @@ jobs:
           body_path: notes.txt
           prerelease: ${{ contains(steps.ver.outputs.tag, '-') }}
           files: |
-            csharp/publish/ClaudeUsageTracker.exe
-            csharp/publish/ClaudeUsageTracker.exe.sha256
+            ClaudeUsageTracker-v${{ steps.ver.outputs.version }}-win-x64.zip
+            SHA256SUMS.txt
