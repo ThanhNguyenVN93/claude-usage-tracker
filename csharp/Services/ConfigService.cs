@@ -28,15 +28,37 @@ namespace ClaudeUsageTracker.Services
 
     public static class ConfigService
     {
-        private static readonly string ConfigPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
+        // Lưu trong %APPDATA%\ClaudeUsageTracker\ để tồn tại qua các lần update/cài lại.
+        private static readonly string ConfigDir  = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTracker");
+        private static readonly string ConfigPath = Path.Combine(ConfigDir, "config.json");
+
+        // Đường dẫn cũ (cùng thư mục exe) — dùng để migrate một lần.
+        private static readonly string LegacyPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "config.json");
 
         public static AppConfig Load()
         {
+            Directory.CreateDirectory(ConfigDir);
+
+            // Migration một lần: chuyển config cũ từ thư mục exe sang %APPDATA%.
+            if (!File.Exists(ConfigPath) && File.Exists(LegacyPath))
+            {
+                try
+                {
+                    File.Copy(LegacyPath, ConfigPath);
+                    File.Delete(LegacyPath);
+                }
+                catch { /* migration thất bại: đọc thẳng file cũ dưới */ }
+            }
+
             try
             {
-                if (File.Exists(ConfigPath))
+                string? pathToRead = File.Exists(ConfigPath) ? ConfigPath
+                                   : File.Exists(LegacyPath) ? LegacyPath
+                                   : null;
+                if (pathToRead != null)
                 {
-                    string json = File.ReadAllText(ConfigPath);
+                    string json = File.ReadAllText(pathToRead);
                     var cfg = JsonSerializer.Deserialize<AppConfig>(json);
                     if (cfg != null) return cfg;
                 }
@@ -55,6 +77,7 @@ namespace ClaudeUsageTracker.Services
         {
             try
             {
+                Directory.CreateDirectory(ConfigDir);
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string json = JsonSerializer.Serialize(config, options);
                 File.WriteAllText(ConfigPath, json);
