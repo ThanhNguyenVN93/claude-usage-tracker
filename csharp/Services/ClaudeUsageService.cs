@@ -179,6 +179,7 @@ namespace ClaudeUsageTracker.Services
                 ExtraUsageDetail = extraDetail,
                 ContextPercent = contextPercent,
                 SessionId = sessionId,
+                ModelName = modelName,
                 Note = note
             };
         }

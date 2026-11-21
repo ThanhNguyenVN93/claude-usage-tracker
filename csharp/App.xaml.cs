@@ -38,6 +38,7 @@ namespace ClaudeUsageTracker
         private ToolStripMenuItem? _updateMenuItem;
         private bool _balloonIsUpdate;
         private string? _lastIconHex;
+        private GlobalHotkeyService? _hotkey;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
@@ -84,6 +85,10 @@ namespace ClaudeUsageTracker
             _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, _config);
             // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
             UpdateTrayTooltip(_lastUsage);
+
+            _hotkey = new GlobalHotkeyService(ToggleHud);
+            try { _hotkey.Register(); }
+            catch { /* hotkey bị app khác chiếm: bỏ qua, không crash */ }
 
             _watcherService.OnClaudeLaunched += OnClaudeLaunched;
             _watcherService.Start();
@@ -169,7 +174,7 @@ namespace ClaudeUsageTracker
             };
 
             var contextMenu = new ContextMenuStrip();
-            contextMenu.Items.Add("📊 Bảng Usage (HUD)", null, (s, e) => ToggleHud());
+            contextMenu.Items.Add("📊 Bảng Usage (HUD)   [Ctrl+Shift+U]", null, (s, e) => ToggleHud());
             contextMenu.Items.Add("📈 Thống kê", null, (s, e) => OpenStats());
             contextMenu.Items.Add("🔄 Làm mới Usage", null, async (s, e) => await RefreshUsageAsync(showFeedback: true));
             _updateMenuItem = new ToolStripMenuItem("⬆ Cập nhật", null, async (s, e) => await PromptAndApplyUpdateAsync())
@@ -469,6 +474,7 @@ namespace ClaudeUsageTracker
         {
             _tick?.Stop();
             _updateTimer?.Stop();
+            _hotkey?.Dispose();
             _apiSync?.Dispose();
             _watcherService.Dispose();
             _fileWatcherService.Dispose();

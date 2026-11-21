@@ -35,6 +35,8 @@
                 <!-- Account and Tier -->
                 <TextBlock x:Name="TxtAccount" Text="Claude Pro / Desktop" FontSize="13" FontWeight="Bold" Foreground="#F5E0DC"
                            TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"/>
+                <TextBlock x:Name="TxtModel" Text="" FontSize="10" Foreground="#89B4FA" Margin="0,1,0,0"
+                           TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Visibility="Collapsed"/>
                 <TextBlock x:Name="TxtRefreshStatus" Text="" FontSize="10" Foreground="#A6ADC8" Margin="0,2,0,0"
                            TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" Visibility="Collapsed"/>
 

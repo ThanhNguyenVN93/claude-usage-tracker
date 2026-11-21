@@ -52,6 +52,15 @@ namespace ClaudeUsageTracker.Views
             _lastSnapshotAt = info.LastRefreshedAt;
             TxtAccount.Text = $"{info.AccountName} ({info.Tier})";
             TxtAccount.ToolTip = TxtAccount.Text;
+            if (!string.IsNullOrEmpty(info.ModelName))
+            {
+                TxtModel.Text = $"🤖 {info.ModelName}";
+                TxtModel.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TxtModel.Visibility = Visibility.Collapsed;
+            }
             TxtRefreshStatus.Visibility = Visibility.Collapsed;
             TxtPercent.Text = $"{info.PercentUsed:0}%";
             PbUsage.Value = info.PercentUsed;

@@ -32,6 +32,8 @@ namespace ClaudeUsageTracker.Models
         public string? ProjectionText { get; set; }
         // Mức cảnh báo đang tồn tại (khác với cảnh báo "bắn một lần"): dùng để đẩy màu icon.
         public AlertLevel ConditionLevel { get; set; } = AlertLevel.None;
+        // Model đang dùng (chỉ có khi đọc từ CLI statusline).
+        public string? ModelName { get; set; }
 
         public string StatusColorHex
         {
