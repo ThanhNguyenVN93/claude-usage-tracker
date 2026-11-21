@@ -489,10 +489,7 @@ namespace ClaudeUsageTracker
             catch (Exception ex)
             {
                 if (manual)
-                {
-                    ShowBalloon("Không kiểm tra được bản mới", ex.Message, ToolTipIcon.Warning);
                     MessageBox.Show($"Không kiểm tra được bản mới:\n{ex.Message}", "Kiểm tra bản mới", MessageBoxButton.OK, MessageBoxImage.Warning);
-                }
             }
         }
 
@@ -638,8 +635,11 @@ namespace ClaudeUsageTracker
             }
         }
 
+        private bool _isExiting;
         private void ExitApplication()
         {
+            if (_isExiting) return;
+            _isExiting = true;
             _tick?.Stop();
             _updateTimer?.Stop();
             _hotkey?.Dispose();

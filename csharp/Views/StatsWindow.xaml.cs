@@ -206,6 +206,7 @@ namespace ClaudeUsageTracker.Views
             double canvasW = TimelineCanvas.ActualWidth;
             double canvasH = TimelineCanvas.ActualHeight;
             if (canvasW <= 0) canvasW = 350;
+            if (canvasH <= 0) canvasH = 36;
 
             var series = _snap.Fh24h;
             if (series.Count == 0)

@@ -85,5 +85,11 @@ namespace ClaudeUsageTracker.Views
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e) => Hide();
+
+        protected override void OnClosed(EventArgs e)
+        {
+            _timer.Stop();
+            base.OnClosed(e);
+        }
     }
 }
