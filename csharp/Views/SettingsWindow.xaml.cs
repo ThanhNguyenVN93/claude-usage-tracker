@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Windows;
+using System.Windows.Input;
 using System.Windows.Media;
 using ClaudeUsageTracker.Services;
 
@@ -10,6 +12,11 @@ namespace ClaudeUsageTracker.Views
     public partial class SettingsWindow : Window
     {
         private readonly AppConfig _config;
+
+        // Hotkey đang chờ xác nhận (chưa Save)
+        private uint _pendingMod;
+        private uint _pendingVk;
+        private bool _hotkeyCapturing;
 
         public SettingsWindow(AppConfig config)
         {
@@ -46,6 +53,10 @@ namespace ClaudeUsageTracker.Views
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
             TxtDivergence.Text = _config.DivergenceThreshold.ToString("0.#");
+
+            _pendingMod = _config.HotkeyModifiers;
+            _pendingVk  = _config.HotkeyVirtualKey;
+            TxtHotkey.Text = FormatHotkey(_pendingMod, _pendingVk);
 
             ChkAutoModel.IsChecked = _config.EnableAutoModel;
             TxtSonnetAt.Text = _config.AutoModelSonnetAt.ToString("0");
@@ -123,6 +134,12 @@ namespace ClaudeUsageTracker.Views
                 _config.AutoModelHaikuAt = haikuAt;
             }
 
+            if (_pendingMod != 0 && _pendingVk != 0)
+            {
+                _config.HotkeyModifiers  = _pendingMod;
+                _config.HotkeyVirtualKey = _pendingVk;
+            }
+
             DialogResult = true;
             Close();
         }
@@ -131,6 +148,86 @@ namespace ClaudeUsageTracker.Views
         {
             DialogResult = false;
             Close();
+        }
+
+        // ── Hotkey capture ────────────────────────────────────────────────────
+
+        private void TxtHotkey_GotFocus(object sender, RoutedEventArgs e)
+        {
+            _hotkeyCapturing = true;
+            TxtHotkey.Text = "Bấm tổ hợp phím…";
+            TxtHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xC2, 0xE7));
+            TxtHotkeyHint.Text = "Esc = huỷ · cần ít nhất Ctrl / Alt / Win kết hợp với phím khác";
+        }
+
+        private void TxtHotkey_LostFocus(object sender, RoutedEventArgs e)
+        {
+            _hotkeyCapturing = false;
+            TxtHotkey.Text = FormatHotkey(_pendingMod, _pendingVk);
+            TxtHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+            TxtHotkeyHint.Text = "Click vào ô rồi bấm tổ hợp phím (cần ít nhất 1 modifier: Ctrl/Alt/Win)";
+        }
+
+        private void TxtHotkey_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (!_hotkeyCapturing) return;
+            e.Handled = true;
+
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+
+            if (key == Key.Escape)
+            {
+                TxtHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                return;
+            }
+
+            // Bỏ qua nếu chỉ bấm modifier đơn thuần
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                     or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin or Key.System)
+                return;
+
+            var mods = Keyboard.Modifiers;
+            // Phải có ít nhất Ctrl, Alt, hoặc Win (tránh chiếm phím bình thường)
+            if ((mods & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+            {
+                TxtHotkey.Text = "Cần Ctrl / Alt / Win!";
+                return;
+            }
+
+            uint win32Mod = 0;
+            if ((mods & ModifierKeys.Control) != 0) win32Mod |= 0x0002;
+            if ((mods & ModifierKeys.Shift)   != 0) win32Mod |= 0x0004;
+            if ((mods & ModifierKeys.Alt)     != 0) win32Mod |= 0x0001;
+            if ((mods & ModifierKeys.Windows) != 0) win32Mod |= 0x0008;
+
+            uint vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+
+            _pendingMod = win32Mod;
+            _pendingVk  = vk;
+
+            TxtHotkey.Text = FormatHotkey(win32Mod, vk);
+            TxtHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+            TxtHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+        }
+
+        private void BtnResetHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            _pendingMod = 0x0006; // Ctrl+Shift
+            _pendingVk  = 0x55;   // U
+            TxtHotkey.Text = FormatHotkey(_pendingMod, _pendingVk);
+        }
+
+        // Win32 modifier flags → chuỗi dễ đọc; vk → tên phím
+        private static string FormatHotkey(uint mod, uint vk)
+        {
+            if (mod == 0 || vk == 0) return "(chưa đặt)";
+            var parts = new List<string>();
+            if ((mod & 0x0002) != 0) parts.Add("Ctrl");
+            if ((mod & 0x0004) != 0) parts.Add("Shift");
+            if ((mod & 0x0001) != 0) parts.Add("Alt");
+            if ((mod & 0x0008) != 0) parts.Add("Win");
+            parts.Add(KeyInterop.KeyFromVirtualKey((int)vk).ToString());
+            return string.Join(" + ", parts);
         }
     }
 }

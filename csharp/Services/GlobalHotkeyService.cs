@@ -4,8 +4,6 @@ using System.Windows.Interop;
 
 namespace ClaudeUsageTracker.Services
 {
-    // Đăng ký một global hotkey và gọi callback khi người dùng bấm.
-    // Dùng message-only window (HwndSource) — không cần cửa sổ hiện.
     public sealed class GlobalHotkeyService : IDisposable
     {
         [DllImport("user32.dll", SetLastError = true)]
@@ -14,31 +12,53 @@ namespace ClaudeUsageTracker.Services
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        private const uint MOD_CONTROL = 0x0002;
-        private const uint MOD_SHIFT   = 0x0004;
-        private const uint VK_U        = 0x55;
-        private const int  WM_HOTKEY   = 0x0312;
-        private const int  HotkeyId    = 0x9001;
+        private const int  WM_HOTKEY = 0x0312;
+        private const int  HotkeyId  = 0x9001;
 
-        private HwndSource? _source;
+        private HwndSource?  _source;
         private readonly Action _onTriggered;
+        private uint _modifiers;
+        private uint _vk;
 
         public GlobalHotkeyService(Action onTriggered)
         {
             _onTriggered = onTriggered;
         }
 
-        public void Register()
+        public void Register(AppConfig config) => Register(config.HotkeyModifiers, config.HotkeyVirtualKey);
+
+        public void Register(uint modifiers, uint vk)
         {
-            var parms = new HwndSourceParameters("ClaudeUsageTracker_HotkeyHost")
+            _modifiers = modifiers;
+            _vk        = vk;
+
+            if (_source == null)
             {
-                Width = 0, Height = 0,
-                WindowStyle = 0x800000,  // WS_POPUP (gọn nhất)
-                ParentWindow = new IntPtr(-3),  // HWND_MESSAGE
-            };
-            _source = new HwndSource(parms);
-            _source.AddHook(WndProc);
-            RegisterHotKey(_source.Handle, HotkeyId, MOD_CONTROL | MOD_SHIFT, VK_U);
+                var parms = new HwndSourceParameters("ClaudeUsageTracker_HotkeyHost")
+                {
+                    Width = 0, Height = 0,
+                    WindowStyle = 0x800000,       // WS_POPUP
+                    ParentWindow = new IntPtr(-3), // HWND_MESSAGE
+                };
+                _source = new HwndSource(parms);
+                _source.AddHook(WndProc);
+            }
+            else
+            {
+                UnregisterHotKey(_source.Handle, HotkeyId);
+            }
+
+            RegisterHotKey(_source.Handle, HotkeyId, modifiers, vk);
+        }
+
+        // Đổi hotkey không cần tạo lại cửa sổ.
+        public void Reregister(uint modifiers, uint vk)
+        {
+            if (_source == null) return;
+            UnregisterHotKey(_source.Handle, HotkeyId);
+            _modifiers = modifiers;
+            _vk        = vk;
+            RegisterHotKey(_source.Handle, HotkeyId, modifiers, vk);
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)

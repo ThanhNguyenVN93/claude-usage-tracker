@@ -61,6 +61,29 @@
 
             <CheckBox x:Name="ChkAutoStart" Content="Khởi động cùng Windows" Foreground="#CDD6F4" FontSize="11" Margin="0,0,0,14"/>
 
+            <!-- Hotkey -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <TextBlock Text="Phím tắt toggle HUD:" Foreground="#CDD6F4" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <Border BorderBrush="#45475A" BorderThickness="1" CornerRadius="4" Background="#1E1E2E"
+                        VerticalAlignment="Center">
+                    <TextBox x:Name="TxtHotkey" Width="140" Background="Transparent" Foreground="#A6E3A1"
+                             BorderThickness="0" Padding="6,3" FontSize="11" IsReadOnly="True"
+                             VerticalContentAlignment="Center" Cursor="Hand"
+                             PreviewKeyDown="TxtHotkey_PreviewKeyDown"
+                             GotFocus="TxtHotkey_GotFocus" LostFocus="TxtHotkey_LostFocus"
+                             ToolTip="Click vào rồi bấm tổ hợp phím mới"/>
+                </Border>
+                <Button x:Name="BtnResetHotkey" Content="Mặc định" Margin="6,0,0,0"
+                        Background="#313244" Foreground="#A6ADC8" BorderThickness="0"
+                        Padding="6,3" FontSize="10" Cursor="Hand" Click="BtnResetHotkey_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+            <TextBlock x:Name="TxtHotkeyHint" Text="Click vào ô rồi bấm tổ hợp phím (cần ít nhất 1 modifier: Ctrl/Alt/Win)"
+                       FontSize="10" FontStyle="Italic" Foreground="#6C7086" Margin="0,0,0,14" TextWrapping="Wrap"/>
+
             <Rectangle Height="1" Fill="#313244" Margin="0,0,0,14"/>
 
             <CheckBox x:Name="ChkAlerts" Content="Bật cảnh báo usage (balloon + đổi màu icon)" Foreground="#CDD6F4" FontSize="11" Margin="0,0,0,10"/>

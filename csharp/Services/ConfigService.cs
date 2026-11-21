@@ -20,6 +20,9 @@ namespace ClaudeUsageTracker.Services
         public bool EnableResetReminder { get; set; } = true;
         // Chỉ kiểm tra và thông báo; tải về luôn phải hỏi người dùng trước.
         public bool EnableUpdateCheck { get; set; } = true;
+        // Global hotkey toggle HUD: MOD_CONTROL|MOD_SHIFT=6, VK_U=0x55
+        public uint HotkeyModifiers { get; set; } = 0x0006;  // Ctrl+Shift
+        public uint HotkeyVirtualKey { get; set; } = 0x55;   // U
         // Sửa cấu hình của app khác (Claude Code) nên mặc định TẮT.
         public bool EnableAutoModel { get; set; } = false;
         public double AutoModelSonnetAt { get; set; } = 85;

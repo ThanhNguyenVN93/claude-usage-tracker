@@ -39,6 +39,7 @@ namespace ClaudeUsageTracker
         private bool _balloonIsUpdate;
         private string? _lastIconHex;
         private GlobalHotkeyService? _hotkey;
+        private ToolStripMenuItem? _hudMenuItem;
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
@@ -87,7 +88,7 @@ namespace ClaudeUsageTracker
             UpdateTrayTooltip(_lastUsage);
 
             _hotkey = new GlobalHotkeyService(ToggleHud);
-            try { _hotkey.Register(); }
+            try { _hotkey.Register(_config); }
             catch { /* hotkey bị app khác chiếm: bỏ qua, không crash */ }
 
             _watcherService.OnClaudeLaunched += OnClaudeLaunched;
@@ -174,7 +175,9 @@ namespace ClaudeUsageTracker
             };
 
             var contextMenu = new ContextMenuStrip();
-            contextMenu.Items.Add("📊 Bảng Usage (HUD)   [Ctrl+Shift+U]", null, (s, e) => ToggleHud());
+            _hudMenuItem = new ToolStripMenuItem($"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]");
+            _hudMenuItem.Click += (s, e) => ToggleHud();
+            contextMenu.Items.Add(_hudMenuItem);
             contextMenu.Items.Add("📈 Thống kê", null, (s, e) => OpenStats());
             contextMenu.Items.Add("🔄 Làm mới Usage", null, async (s, e) => await RefreshUsageAsync(showFeedback: true));
             _updateMenuItem = new ToolStripMenuItem("⬆ Cập nhật", null, async (s, e) => await PromptAndApplyUpdateAsync())
@@ -263,6 +266,18 @@ namespace ClaudeUsageTracker
                 });
                 toast.Show();
             });
+        }
+
+        private static string FormatHotkey(uint mod, uint vk)
+        {
+            if (mod == 0 || vk == 0) return "?";
+            var parts = new System.Collections.Generic.List<string>();
+            if ((mod & 0x0002) != 0) parts.Add("Ctrl");
+            if ((mod & 0x0004) != 0) parts.Add("Shift");
+            if ((mod & 0x0001) != 0) parts.Add("Alt");
+            if ((mod & 0x0008) != 0) parts.Add("Win");
+            parts.Add(System.Windows.Input.KeyInterop.KeyFromVirtualKey((int)vk).ToString());
+            return string.Join("+", parts);
         }
 
         private void ToggleHud()
@@ -463,6 +478,9 @@ namespace ClaudeUsageTracker
             if (settings.ShowDialog() == true)
             {
                 ConfigService.Save(_config);
+                try { _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey); } catch { }
+                if (_hudMenuItem != null)
+                    _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
                 // Nếu vừa cấu hình SessionKey, sync API ngay lập tức
                 if (!string.IsNullOrWhiteSpace(_config.SessionKey))
                     _ = _apiSync.SyncOnceAsync(_config);
