@@ -350,7 +350,7 @@ namespace ClaudeUsageTracker
                 if (info.ConditionLevel == AlertLevel.Critical) hex = "#EF4444";
                 else if (info.ConditionLevel == AlertLevel.Warn && hex == "#10B981") hex = "#F59E0B";
 
-                if (hex != _lastIconHex)
+                if (hex != _lastIconHex && _notifyIcon.ContextMenuStrip?.Visible != true)
                 {
                     _lastIconHex = hex;
                     var oldIcon = _notifyIcon.Icon;
