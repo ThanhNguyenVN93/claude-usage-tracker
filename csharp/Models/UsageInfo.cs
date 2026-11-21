@@ -19,6 +19,14 @@ namespace ClaudeUsageTracker.Models
         public double? ExtraUsagePercent { get; set; }
         public string? ExtraUsageDetail { get; set; }
         public double WeeklyPercent { get; set; }
+        public string SourceLabel { get; set; } = string.Empty;
+        // Số của nguồn *không* được chọn, để so khớp hai nguồn với nhau.
+        public double? OtherSourcePercent { get; set; }
+        public string? OtherSourceLabel { get; set; }
+        public DateTime? OtherSourceTime { get; set; }
+        public double? EstimatedPercent { get; set; }
+        public string? EstimateNote { get; set; }
+        public string? DivergenceNote { get; set; }
         public double? ContextPercent { get; set; }
         public string? SessionId { get; set; }
         public string? ProjectionText { get; set; }

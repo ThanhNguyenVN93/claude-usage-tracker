@@ -36,6 +36,7 @@ namespace ClaudeUsageTracker.Services
 
             info.ProjectionText = info.IsDemo ? null : projection.Text;
             info.ConditionLevel = ComputeCondition(info, projection);
+            AttachEstimate(info, samples, now);
 
             if (info.IsDemo || info.IsStale) return new List<Alert>();
 
@@ -44,6 +45,43 @@ namespace ClaudeUsageTracker.Services
 
             if (alerts.Count > 0) AlertStateStore.Save(TrackerPaths.AlertState, _state);
             return alerts;
+        }
+
+        // Hai cách bù độ trễ làm fallback cho nhau: nếu 2 nguồn lệch nhau thì cảnh báo và KHÔNG ước tính
+        // (không biết tin nguồn nào); nếu không ước tính được thì giữ số thật + tuổi dữ liệu.
+        private void AttachEstimate(UsageInfo info, List<UsageSample> samples, DateTime now)
+        {
+            info.EstimatedPercent = null;
+            info.EstimateNote = null;
+            info.DivergenceNote = null;
+            if (info.IsDemo) return;
+
+            bool diverged = false;
+            if (info.OtherSourcePercent.HasValue && info.OtherSourceTime.HasValue
+                && Math.Abs((info.LastRefreshedAt - info.OtherSourceTime.Value).TotalMinutes) <= 5)
+            {
+                double diff = Math.Abs(info.PercentUsed - info.OtherSourcePercent.Value);
+                if (diff >= _config.DivergenceThreshold)
+                {
+                    diverged = true;
+                    info.DivergenceNote =
+                        $"⚠ 2 nguồn lệch {diff:0} điểm: {info.SourceLabel} {info.PercentUsed:0}% / " +
+                        $"{info.OtherSourceLabel} {info.OtherSourcePercent.Value:0}% (đang dùng nguồn mới hơn)";
+                }
+            }
+
+            if (!_config.EnableEstimate || diverged || info.IsStale) return;
+
+            var est = StatsService.EstimateNow(samples, now, ValidReset(info, now));
+            if (est == null) return;
+
+            // Chỉ tin ước tính khi mẫu cuối trong lịch sử đúng là mẫu đang hiển thị.
+            var infoAge = now - info.LastRefreshedAt;
+            if (Math.Abs((infoAge - est.SampleAge).TotalMinutes) > 2) return;
+
+            info.EstimatedPercent = Math.Min(100, info.PercentUsed + est.Delta);
+            info.EstimateNote =
+                $"≈ {info.EstimatedPercent.Value:0}% ước tính hiện tại (+{est.Delta:0}% sau {(int)est.SampleAge.TotalMinutes} phút)";
         }
 
         public StatsSnapshot BuildSnapshot(UsageInfo info)
@@ -79,7 +117,8 @@ namespace ClaudeUsageTracker.Services
             {
                 Enabled = _config.EnableAlerts,
                 Thresholds = thresholds.Length > 0 ? thresholds : new[] { 80, 95 },
-                ContextWarnPercent = _config.ContextWarnPercent
+                ContextWarnPercent = _config.ContextWarnPercent,
+                ResetReminder = _config.EnableResetReminder
             };
         }
 

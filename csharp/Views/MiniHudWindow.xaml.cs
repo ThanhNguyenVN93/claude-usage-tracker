@@ -75,6 +75,8 @@ namespace ClaudeUsageTracker.Views
             }
 
             var insight = new System.Collections.Generic.List<string>();
+            if (!string.IsNullOrEmpty(info.DivergenceNote)) insight.Add(info.DivergenceNote);
+            if (!string.IsNullOrEmpty(info.EstimateNote)) insight.Add(info.EstimateNote);
             if (!string.IsNullOrEmpty(info.ProjectionText)) insight.Add($"📈 {info.ProjectionText}");
             if (info.ContextPercent.HasValue) insight.Add($"🧠 Ngữ cảnh phiên: {info.ContextPercent.Value:0}%");
             if (insight.Count > 0)

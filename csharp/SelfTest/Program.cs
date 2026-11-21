@@ -78,6 +78,38 @@ Console.WriteLine("StatsService.ComputeProjection");
     Check("đã 100%: báo đã chạm trần", StatsService.ComputeProjection(full, now, reset).Text.Contains("chạm trần"));
 }
 
+Console.WriteLine("StatsService.EstimateNow");
+{
+    var reset = now.AddHours(2);
+
+    // 5% mỗi 15 phút = 20%/giờ, mẫu cuối cũ 10 phút => +3.3 điểm
+    var steady = new List<UsageSample> { S(40, 10), S(25, 15), S(10, 20) };
+    var e = StatsService.EstimateNow(steady, now, reset);
+    Check("nhịp đều: có ước tính ≈ 23.3%", e != null && Math.Abs(e.Value - 23.33) < 0.5, $"(got {e?.Value})");
+    Check("delta ≈ 3.3 điểm", e != null && Math.Abs(e.Delta - 3.33) < 0.5);
+
+    var fresh = new List<UsageSample> { S(41, 10), S(26, 15), S(1, 20) };
+    Check("mẫu mới (<2 phút): không cần ước tính", StatsService.EstimateNow(fresh, now, reset) == null);
+
+    var stale = new List<UsageSample> { S(70, 10), S(55, 15), S(30, 20) };
+    Check("mẫu quá cũ (>20 phút): không ước tính", StatsService.EstimateNow(stale, now, reset) == null);
+
+    var idle = new List<UsageSample> { S(60, 10), S(45, 20), S(30, 30), S(15, 30) };
+    Check("vừa nghỉ sau đợt dùng mạnh: không ước tính", StatsService.EstimateNow(idle, now, reset) == null);
+
+    var fast = new List<UsageSample> { S(45, 10), S(30, 40), S(15, 70) }; // 120%/giờ
+    var ef = StatsService.EstimateNow(fast, now, reset);
+    Check("nhịp rất nhanh: chặn trần +10 điểm", ef != null && Math.Abs(ef.Delta - 10) < 1e-9 && Math.Abs(ef.Value - 80) < 1e-9, $"(got {ef?.Delta})");
+
+    Check("đã qua giờ reset: không ước tính", StatsService.EstimateNow(steady, now, now.AddMinutes(-1)) == null);
+    Check("đã 100%: không ước tính", StatsService.EstimateNow(new List<UsageSample> { S(30, 98), S(12, 100) }, now, reset) == null);
+    Check("quá ít mẫu: không ước tính", StatsService.EstimateNow(new List<UsageSample> { S(10, 20) }, now, reset) == null);
+
+    var nearCap = new List<UsageSample> { S(45, 60), S(30, 75), S(10, 92) }; // ~ 40%/giờ
+    var en = StatsService.EstimateNow(nearCap, now, reset);
+    Check("không bao giờ vượt 100%", en == null || en.Value <= 100);
+}
+
 Console.WriteLine("AlertEngine");
 {
     var cfg = new AlertConfig();
@@ -124,8 +156,132 @@ Console.WriteLine("AlertEngine");
     Check("dự báo: cooldown 30 phút", AlertEngine.Evaluate(In(61, p: risky, minutes: 10), cfg, s4).Count == 0);
     Check("dự báo: hết cooldown thì báo lại", AlertEngine.Evaluate(In(62, p: risky, minutes: 45), cfg, s4).Count == 1);
 
+    // nhắc khi đã reset sau lúc chạm trần
+    var rs = new AlertState();
+    Check("chưa từng chạm trần, % thấp: không nhắc reset", AlertEngine.Evaluate(In(30), cfg, rs).All(a => !a.Title.Contains("reset")));
+    AlertEngine.Evaluate(In(97), cfg, rs); // chạm trần => ghi cờ
+    var after = AlertEngine.Evaluate(In(12, minutes: 120), cfg, rs);
+    Check("chạm trần rồi reset: nhắc đúng 1 lần mức Info",
+        after.Count(a => a.Title.Contains("reset")) == 1 && after.First(a => a.Title.Contains("reset")).Level == AlertLevel.Info);
+    Check("nhắc xong: không nhắc lặp", AlertEngine.Evaluate(In(15, minutes: 125), cfg, rs).All(a => !a.Title.Contains("reset")));
+
+    var rs2 = new AlertState();
+    AlertEngine.Evaluate(In(96), cfg, rs2);
+    Check("còn cao (chưa reset): chưa nhắc", AlertEngine.Evaluate(In(80, minutes: 10), cfg, rs2).All(a => !a.Title.Contains("reset")));
+
+    var rs3 = new AlertState();
+    AlertEngine.Evaluate(In(96), cfg, rs3);
+    var noRemind = new AlertConfig { ResetReminder = false };
+    Check("tắt nhắc reset: im lặng", AlertEngine.Evaluate(In(5, minutes: 200), noRemind, rs3).All(a => !a.Title.Contains("reset")));
+
+    var rs4 = new AlertState();
+    AlertEngine.Evaluate(In(10, sd: 97), cfg, rs4);
+    Check("tuần chạm trần rồi reset: nhắc riêng cho tuần",
+        AlertEngine.Evaluate(In(10, sd: 3, minutes: 60), cfg, rs4).Any(a => a.Title.Contains("tuần") && a.Title.Contains("reset")));
+
     var off = new AlertConfig { Enabled = false };
     Check("tắt cảnh báo: im lặng", AlertEngine.Evaluate(In(99, ctx: 99), off, new AlertState()).Count == 0);
+}
+
+Console.WriteLine("ModelSwitchEngine");
+{
+    var o = new ModelSwitchOptions(85, 95);
+    var none = new ModelSwitchState();
+    ModelSwitchState Ours(string applied, string? original) => new() { Applied = applied, Original = original };
+
+    Check("quota thấp: không đổi", ModelSwitchEngine.Decide(50, o, none, "opus").Action == ModelAction.None);
+
+    var d1 = ModelSwitchEngine.Decide(86, o, none, "opus");
+    Check("≥85% đang opus: đặt sonnet", d1.Action == ModelAction.Apply && d1.Target == "sonnet");
+
+    var d2 = ModelSwitchEngine.Decide(96, o, none, "opus");
+    Check("≥95% đang opus: đặt haiku", d2.Action == ModelAction.Apply && d2.Target == "haiku");
+
+    Check("đang haiku rồi: không đổi", ModelSwitchEngine.Decide(90, o, none, "haiku").Action == ModelAction.None);
+    Check("không bao giờ nâng model (đang sonnet, muốn sonnet)", ModelSwitchEngine.Decide(90, o, none, "claude-sonnet-4-6").Action == ModelAction.None);
+    Check("chưa đặt model (mặc định): đặt sonnet", ModelSwitchEngine.Decide(90, o, none, null).Action == ModelAction.Apply);
+
+    Check("đã đặt sonnet, quota 80%: chờ (trễ)", ModelSwitchEngine.Decide(80, o, Ours("sonnet", "opus"), "sonnet").Action == ModelAction.None);
+
+    var r = ModelSwitchEngine.Decide(70, o, Ours("sonnet", "opus"), "sonnet");
+    Check("quota hạ <75%: khôi phục model gốc", r.Action == ModelAction.Restore && r.Target == "opus");
+
+    var up = ModelSwitchEngine.Decide(96, o, Ours("sonnet", "opus"), "sonnet");
+    Check("đang sonnet, quota ≥95%: hạ tiếp xuống haiku", up.Action == ModelAction.Apply && up.Target == "haiku");
+
+    Check("haiku, quota hạ còn 88%: nới lại sonnet", ModelSwitchEngine.Decide(88, o, Ours("haiku", "opus"), "haiku").Target == "sonnet");
+    Check("haiku, quota 92%: giữ haiku (trễ)", ModelSwitchEngine.Decide(92, o, Ours("haiku", "opus"), "haiku").Action == ModelAction.None);
+
+    Check("người dùng tự đổi model: không đè, bỏ theo dõi",
+        ModelSwitchEngine.Decide(90, o, Ours("sonnet", "opus"), "opus").Action == ModelAction.Forget);
+
+    Check("model gốc null được khôi phục thành null", ModelSwitchEngine.Decide(10, o, Ours("sonnet", null), "sonnet").Target == null);
+}
+
+Console.WriteLine("ModelSwitchService + ClaudeSettingsFile");
+{
+    string dir = Path.Combine(Path.GetTempPath(), $"modelsw_{Guid.NewGuid():N}");
+    Directory.CreateDirectory(dir);
+    string settings = Path.Combine(dir, "settings.json");
+    string state = Path.Combine(dir, "model-switch.json");
+
+    const string original =
+        "{\n  \"model\": \"opus\",\n  \"statusLine\": {\n    \"command\": \"node \\\"C:\\\\x\\\\statusline.js\\\"\"\n  },\n  \"note\": \"tiếng Việt có dấu\",\n  \"effortLevel\": \"medium\"\n}";
+    File.WriteAllText(settings, original);
+
+    var cfg = new AppConfig { EnableAutoModel = true };
+    UsageInfo Info(double fh, double sd = 0, bool stale = false, bool demo = false)
+        => new() { PercentUsed = fh, WeeklyPercent = sd, IsStale = stale, IsDemo = demo };
+
+    var svc = new ModelSwitchService(cfg, new ClaudeSettingsFile(settings), state);
+
+    var a = svc.Evaluate(Info(88, 10));
+    var sf = new ClaudeSettingsFile(settings);
+    Check("áp dụng: trả cảnh báo mức Info", a != null && a.Level == AlertLevel.Info && a.Title.Contains("sonnet"));
+    Check("ghi model = sonnet", sf.ReadModel() == "sonnet");
+    string after = File.ReadAllText(settings);
+    Check("giữ nguyên các khoá khác + tiếng Việt", after.Contains("statusLine") && after.Contains("effortLevel") && after.Contains("tiếng Việt có dấu"));
+    Check("có bản sao lưu gốc (model=opus)", File.Exists(settings + ".tracker.bak") && File.ReadAllText(settings + ".tracker.bak").Contains("\"opus\""));
+    Check("có file trạng thái", File.Exists(state));
+    Check("đánh giá lại cùng quota: không ghi lặp", svc.Evaluate(Info(89, 10)) == null);
+
+    var restored = svc.Evaluate(Info(50, 10));
+    Check("quota hạ: khôi phục opus + báo", restored != null && sf.ReadModel() == "opus");
+    Check("sau khôi phục: trạng thái sạch", new ModelSwitchService(cfg, new ClaudeSettingsFile(settings), state).Evaluate(Info(50)) == null);
+
+    // người dùng tự đổi model giữa chừng
+    svc.Evaluate(Info(88));
+    File.WriteAllText(settings, File.ReadAllText(settings).Replace("\"model\": \"sonnet\"", "\"model\": \"haiku\""));
+    Check("người dùng tự đổi sang haiku: tool không đè", svc.Evaluate(Info(90)) == null && sf.ReadModel() == "haiku");
+    Check("bị bỏ theo dõi: quota hạ cũng không khôi phục", svc.Evaluate(Info(10)) == null && sf.ReadModel() == "haiku");
+
+    // tắt tính năng
+    File.WriteAllText(settings, original);
+    File.Delete(state);
+    var off = new ModelSwitchService(new AppConfig { EnableAutoModel = false }, new ClaudeSettingsFile(settings), state);
+    Check("tắt tính năng: không đụng settings", off.Evaluate(Info(99)) == null && File.ReadAllText(settings) == original);
+
+    // dữ liệu cũ / demo
+    var on = new ModelSwitchService(cfg, new ClaudeSettingsFile(settings), state);
+    Check("dữ liệu cũ: không hành động", on.Evaluate(Info(99, stale: true)) == null && File.ReadAllText(settings) == original);
+    Check("dữ liệu demo: không hành động", on.Evaluate(Info(99, demo: true)) == null && File.ReadAllText(settings) == original);
+
+    // settings hỏng: tuyệt đối không ghi đè
+    string broken = "{ \"model\": \"opus\", đây không phải json hợp lệ";
+    File.WriteAllText(settings, broken);
+    var onBroken = new ModelSwitchService(cfg, new ClaudeSettingsFile(settings), Path.Combine(dir, "s2.json"));
+    Check("settings không hợp lệ: không ghi đè", onBroken.Evaluate(Info(99)) == null && File.ReadAllText(settings) == broken);
+
+    // chưa có khoá model: khôi phục phải xoá khoá chứ không để lại
+    File.WriteAllText(settings, "{\n  \"effortLevel\": \"medium\"\n}");
+    var noModel = new ModelSwitchService(cfg, new ClaudeSettingsFile(settings), Path.Combine(dir, "s3.json"));
+    noModel.Evaluate(Info(90));
+    Check("không có model gốc: đặt sonnet", new ClaudeSettingsFile(settings).ReadModel() == "sonnet");
+    noModel.Evaluate(Info(10));
+    Check("khôi phục => xoá khoá model, giữ khoá khác",
+        new ClaudeSettingsFile(settings).ReadModel() == null && File.ReadAllText(settings).Contains("effortLevel") && !File.ReadAllText(settings).Contains("\"model\""));
+
+    Directory.Delete(dir, true);
 }
 
 Console.WriteLine("HistoryService");

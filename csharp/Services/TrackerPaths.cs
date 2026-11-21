@@ -22,6 +22,22 @@ namespace ClaudeUsageTracker.Services
         public static string CliUsage => Path.Combine(DataDir, "cli-usage.json");
         public static string CliHistory => Path.Combine(DataDir, "cli-history.jsonl");
         public static string AlertState => Path.Combine(DataDir, "alert-state.json");
+        public static string ModelSwitch => Path.Combine(DataDir, "model-switch.json");
+
+        // settings.json của Claude Code. Có thể ghi đè bằng CLAUDE_USAGE_TRACKER_SETTINGS (dùng khi kiểm thử).
+        public static string ClaudeSettings
+        {
+            get
+            {
+                string? overridePath = Environment.GetEnvironmentVariable("CLAUDE_USAGE_TRACKER_SETTINGS");
+                if (!string.IsNullOrWhiteSpace(overridePath)) return overridePath;
+
+                string? configDir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+                if (string.IsNullOrWhiteSpace(configDir))
+                    configDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude");
+                return Path.Combine(configDir, "settings.json");
+            }
+        }
 
         public static string DesktopHistory
         {
