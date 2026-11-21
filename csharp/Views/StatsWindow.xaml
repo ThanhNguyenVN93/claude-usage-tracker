@@ -75,7 +75,7 @@
                 </StackPanel>
 
                 <TextBlock x:Name="TxtFootnote" FontSize="9" FontStyle="Italic" Foreground="#6C7086" TextWrapping="Wrap" Margin="0,10,0,0"
-                           Text="Ước lượng dựa trên chênh lệch % giữa các lần ghi, chỉ tính khi dùng Claude Code CLI. Quota dùng chung nhiều nơi nên có thể lệch."/>
+                           Text="Biểu đồ lịch sử gộp cả Desktop (API sync) lẫn CLI. Phân tích theo model chỉ hoạt động khi có Claude Code CLI (statusline.js) vì API claude.ai không trả về dữ liệu per-model. Quota dùng chung nên có thể lệch."/>
             </StackPanel>
         </StackPanel>
     </Border>
