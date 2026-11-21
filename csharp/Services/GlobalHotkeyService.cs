@@ -12,17 +12,20 @@ namespace ClaudeUsageTracker.Services
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        private const int  WM_HOTKEY = 0x0312;
-        private const int  HotkeyId  = 0x9001;
+        private const int WM_HOTKEY = 0x0312;
 
+        private readonly int    _id;
+        private readonly string _windowName;
         private HwndSource?  _source;
         private readonly Action _onTriggered;
         private uint _modifiers;
         private uint _vk;
 
-        public GlobalHotkeyService(Action onTriggered)
+        public GlobalHotkeyService(Action onTriggered, int hotkeyId = 0x9001)
         {
             _onTriggered = onTriggered;
+            _id          = hotkeyId;
+            _windowName  = $"ClaudeUsageTracker_HotkeyHost_{hotkeyId:X4}";
         }
 
         public void Register(AppConfig config) => Register(config.HotkeyModifiers, config.HotkeyVirtualKey);
@@ -34,7 +37,7 @@ namespace ClaudeUsageTracker.Services
 
             if (_source == null)
             {
-                var parms = new HwndSourceParameters("ClaudeUsageTracker_HotkeyHost")
+                var parms = new HwndSourceParameters(_windowName)
                 {
                     Width = 0, Height = 0,
                     WindowStyle = 0x800000,       // WS_POPUP
@@ -45,25 +48,25 @@ namespace ClaudeUsageTracker.Services
             }
             else
             {
-                UnregisterHotKey(_source.Handle, HotkeyId);
+                UnregisterHotKey(_source.Handle, _id);
             }
 
-            RegisterHotKey(_source.Handle, HotkeyId, modifiers, vk);
+            RegisterHotKey(_source.Handle, _id, modifiers, vk);
         }
 
         // Đổi hotkey không cần tạo lại cửa sổ.
         public void Reregister(uint modifiers, uint vk)
         {
             if (_source == null) return;
-            UnregisterHotKey(_source.Handle, HotkeyId);
+            UnregisterHotKey(_source.Handle, _id);
             _modifiers = modifiers;
             _vk        = vk;
-            RegisterHotKey(_source.Handle, HotkeyId, modifiers, vk);
+            RegisterHotKey(_source.Handle, _id, modifiers, vk);
         }
 
         private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
-            if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
+            if (msg == WM_HOTKEY && wParam.ToInt32() == _id)
             {
                 _onTriggered();
                 handled = true;
@@ -75,7 +78,7 @@ namespace ClaudeUsageTracker.Services
         {
             if (_source != null)
             {
-                try { UnregisterHotKey(_source.Handle, HotkeyId); } catch { }
+                try { UnregisterHotKey(_source.Handle, _id); } catch { }
                 _source.RemoveHook(WndProc);
                 _source.Dispose();
                 _source = null;

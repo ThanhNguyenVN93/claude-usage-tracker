@@ -27,6 +27,11 @@ namespace ClaudeUsageTracker.Services
         public bool EnableAutoModel { get; set; } = false;
         public double AutoModelSonnetAt { get; set; } = 85;
         public double AutoModelHaikuAt { get; set; } = 95;
+        // Hotkey mở Stats window: MOD_CONTROL|MOD_SHIFT=6, VK_S=0x53
+        public uint StatsHotkeyModifiers { get; set; } = 0x0006;
+        public uint StatsHotkeyVirtualKey { get; set; } = 0x53;
+        // Webhook URL để gửi cảnh báo usage (Discord, Slack, generic)
+        public string WebhookUrl { get; set; } = string.Empty;
     }
 
     public static class ConfigService

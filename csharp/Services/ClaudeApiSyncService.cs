@@ -32,9 +32,13 @@ namespace ClaudeUsageTracker.Services
 
         // ── Public API ───────────────────────────────────────────────────────
 
+        /// <summary>Tạm dừng sync (không dừng timer, chỉ bỏ qua mỗi lần gọi).</summary>
+        public bool Paused { get; set; } = false;
+
         /// <summary>Gọi một lần rồi trả về, không ném exception ra ngoài.</summary>
         public async Task SyncOnceAsync(AppConfig config)
         {
+            if (Paused) return;
             if (string.IsNullOrWhiteSpace(config.SessionKey) ||
                 !config.SessionKey.StartsWith("sk-ant-"))
                 return;

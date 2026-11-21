@@ -47,6 +47,7 @@ namespace ClaudeUsageTracker.Views
                 Top = work.Bottom - ActualHeight - 16;
                 ((Storyboard)FindResource("FadeIn")).Begin(this);
                 DrawChart();
+                DrawTimeline();
             };
 
             // Giống toast: tự đóng khi người dùng bấm sang chỗ khác. Phải chặn gọi Close() lần hai:
@@ -197,6 +198,70 @@ namespace ClaudeUsageTracker.Views
         {
             const double pad = 4;
             return pad + (height - 2 * pad) * (1 - Math.Clamp(percent, 0, 100) / 100.0);
+        }
+
+        private void DrawTimeline()
+        {
+            TimelineCanvas.Children.Clear();
+            double canvasW = TimelineCanvas.ActualWidth;
+            double canvasH = TimelineCanvas.ActualHeight;
+            if (canvasW <= 0) canvasW = 350;
+
+            var series = _snap.Fh24h;
+            if (series.Count == 0)
+            {
+                var empty = new TextBlock { Text = "Chưa có dữ liệu", FontSize = 10, Foreground = Brush("#6C7086") };
+                Canvas.SetLeft(empty, 8); Canvas.SetTop(empty, 10);
+                TimelineCanvas.Children.Add(empty);
+                return;
+            }
+
+            // Group samples by hour over last 24h
+            var now = DateTime.Now;
+            var hourlyMax = new double[24];
+            foreach (var p in series)
+            {
+                double hoursAgo = (now - p.Time).TotalHours;
+                if (hoursAgo < 0 || hoursAgo >= 24) continue;
+                int slot = 23 - (int)hoursAgo; // slot 0 = 23h ago, slot 23 = current hour
+                if (p.Value > hourlyMax[slot]) hourlyMax[slot] = p.Value;
+            }
+
+            double slotW = canvasW / 24.0;
+            double pad = 2;
+
+            for (int i = 0; i < 24; i++)
+            {
+                double val = hourlyMax[i];
+                string color = val >= 90 ? "#F38BA8"
+                             : val >= 70 ? "#FAB387"
+                             : val >= 30 ? "#F9E2AF"
+                             : val >  0  ? "#A6E3A1"
+                                         : "#313244";
+
+                var rect = new Border
+                {
+                    Width  = Math.Max(slotW - pad, 1),
+                    Height = canvasH - 4,
+                    Background = Brush(color),
+                    CornerRadius = new CornerRadius(2),
+                    ToolTip = $"{(now.Hour - 23 + i + 24) % 24:D2}:xx — {(val > 0 ? val.ToString("0.#") + "%" : "không có data")}"
+                };
+                Canvas.SetLeft(rect, i * slotW + pad / 2);
+                Canvas.SetTop(rect, 2);
+                TimelineCanvas.Children.Add(rect);
+            }
+
+            // Hour labels at 0h, 6h, 12h, 18h, now
+            foreach (int markerHour in new[] { 0, 6, 12, 18 })
+            {
+                int slot = (markerHour - now.Hour + 24) % 24;
+                // Label below
+                var lbl = new TextBlock { Text = $"{markerHour:D2}", FontSize = 8, Foreground = Brush("#6C7086") };
+                Canvas.SetLeft(lbl, slot * slotW);
+                Canvas.SetTop(lbl, canvasH - 10);
+                TimelineCanvas.Children.Add(lbl);
+            }
         }
 
         private void ChartCanvas_SizeChanged(object sender, SizeChangedEventArgs e) => DrawChart();

@@ -17,6 +17,9 @@ namespace ClaudeUsageTracker.Views
         private uint _pendingMod;
         private uint _pendingVk;
         private bool _hotkeyCapturing;
+        private uint _pendingStatsMod;
+        private uint _pendingStatsVk;
+        private bool _statsHotkeyCapturing;
 
         public SettingsWindow(AppConfig config)
         {
@@ -61,6 +64,12 @@ namespace ClaudeUsageTracker.Views
             ChkAutoModel.IsChecked = _config.EnableAutoModel;
             TxtSonnetAt.Text = _config.AutoModelSonnetAt.ToString("0");
             TxtHaikuAt.Text = _config.AutoModelHaikuAt.ToString("0");
+
+            _pendingStatsMod = _config.StatsHotkeyModifiers;
+            _pendingStatsVk  = _config.StatsHotkeyVirtualKey;
+            TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
+
+            TxtWebhookUrl.Text = _config.WebhookUrl;
 
             var version = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version;
             TxtVersion.Text = $"Phiên bản {version?.ToString(3) ?? "?"} · nguồn dữ liệu usage và tuỳ chọn chạy nền";
@@ -140,6 +149,14 @@ namespace ClaudeUsageTracker.Views
                 _config.HotkeyVirtualKey = _pendingVk;
             }
 
+            if (_pendingStatsMod != 0 && _pendingStatsVk != 0)
+            {
+                _config.StatsHotkeyModifiers  = _pendingStatsMod;
+                _config.StatsHotkeyVirtualKey = _pendingStatsVk;
+            }
+
+            _config.WebhookUrl = TxtWebhookUrl.Text.Trim();
+
             DialogResult = true;
             Close();
         }
@@ -215,6 +232,64 @@ namespace ClaudeUsageTracker.Views
             _pendingMod = 0x0006; // Ctrl+Shift
             _pendingVk  = 0x55;   // U
             TxtHotkey.Text = FormatHotkey(_pendingMod, _pendingVk);
+        }
+
+        // ── Stats hotkey capture ─────────────────────────────────────────────
+
+        private void TxtStatsHotkey_GotFocus(object sender, RoutedEventArgs e)
+        {
+            _statsHotkeyCapturing = true;
+            TxtStatsHotkey.Text = "Bấm tổ hợp phím…";
+            TxtStatsHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xC2, 0xE7));
+        }
+
+        private void TxtStatsHotkey_LostFocus(object sender, RoutedEventArgs e)
+        {
+            _statsHotkeyCapturing = false;
+            TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
+            TxtStatsHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+        }
+
+        private void TxtStatsHotkey_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (!_statsHotkeyCapturing) return;
+            e.Handled = true;
+
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key == Key.Escape)
+            {
+                TxtStatsHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                return;
+            }
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                     or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin or Key.System)
+                return;
+
+            var mods = Keyboard.Modifiers;
+            if ((mods & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+            {
+                TxtStatsHotkey.Text = "Cần Ctrl / Alt / Win!";
+                return;
+            }
+
+            uint win32Mod = 0;
+            if ((mods & ModifierKeys.Control) != 0) win32Mod |= 0x0002;
+            if ((mods & ModifierKeys.Shift)   != 0) win32Mod |= 0x0004;
+            if ((mods & ModifierKeys.Alt)     != 0) win32Mod |= 0x0001;
+            if ((mods & ModifierKeys.Windows) != 0) win32Mod |= 0x0008;
+
+            _pendingStatsMod = win32Mod;
+            _pendingStatsVk  = (uint)KeyInterop.VirtualKeyFromKey(key);
+            TxtStatsHotkey.Text = FormatHotkey(win32Mod, _pendingStatsVk);
+            TxtStatsHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+            TxtStatsHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+        }
+
+        private void BtnResetStatsHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            _pendingStatsMod = 0x0006; // Ctrl+Shift
+            _pendingStatsVk  = 0x53;   // S
+            TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
         }
 
         // Win32 modifier flags → chuỗi dễ đọc; vk → tên phím

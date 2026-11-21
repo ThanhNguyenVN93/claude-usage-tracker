@@ -4,7 +4,9 @@ using System.Diagnostics;
 using System.Drawing;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Runtime.InteropServices;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
@@ -39,7 +41,14 @@ namespace ClaudeUsageTracker
         private bool _balloonIsUpdate;
         private string? _lastIconHex;
         private GlobalHotkeyService? _hotkey;
+        private GlobalHotkeyService? _hotkeyStats;
         private ToolStripMenuItem? _hudMenuItem;
+        private ToolStripMenuItem? _snoozeMenuItem;
+        private ToolStripMenuItem? _syncPauseMenuItem;
+        private CountdownWindow? _countdownWindow;
+        private DateTime _snoozeUntil;
+        private DateTime _lastClaudeSeenAt;
+        private readonly HttpClient _webhookHttp = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
 
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
@@ -91,6 +100,10 @@ namespace ClaudeUsageTracker
             try { _hotkey.Register(_config); }
             catch { /* hotkey bị app khác chiếm: bỏ qua, không crash */ }
 
+            _hotkeyStats = new GlobalHotkeyService(OpenStats, 0x9002);
+            try { _hotkeyStats.Register(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey); }
+            catch { }
+
             _watcherService.OnClaudeLaunched += OnClaudeLaunched;
             _watcherService.Start();
 
@@ -130,16 +143,22 @@ namespace ClaudeUsageTracker
         private void NotifyAlerts(List<Alert> alerts)
         {
             if (_notifyIcon == null) return;
+            if (DateTime.Now < _snoozeUntil) return;
 
             var level = AlertEngine.MaxLevel(alerts);
             string title = alerts.Count == 1 ? alerts[0].Title : $"{alerts.Count} cảnh báo usage";
             string message = string.Join("\n", alerts.Select(a => alerts.Count == 1 ? a.Message : $"• {a.Title}"));
 
-            _notifyIcon.ShowBalloonTip(
-                8000, title, message,
-                level == AlertLevel.Critical ? ToolTipIcon.Error
-                : level == AlertLevel.Warn ? ToolTipIcon.Warning
-                : ToolTipIcon.Info);
+            string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
+            ToastWindow.ShowToast(title, message, icon, onAction: () =>
+            {
+                _hud.ApplyData(_lastUsage!);
+                _hud.Show();
+                _hud.Activate();
+            });
+
+            if (!string.IsNullOrWhiteSpace(_config.WebhookUrl))
+                _ = PostWebhookAsync(_config.WebhookUrl, title, message);
         }
 
         private void OnForegroundAllowedChanged(bool allowed)
@@ -188,6 +207,16 @@ namespace ClaudeUsageTracker
             contextMenu.Items.Add(_updateMenuItem);
             contextMenu.Items.Add("🔍 Kiểm tra bản mới", null, async (s, e) => await CheckForUpdateAsync(manual: true));
             contextMenu.Items.Add(new ToolStripSeparator());
+            _snoozeMenuItem = new ToolStripMenuItem("🔕 Tắt thông báo 1 giờ");
+            _snoozeMenuItem.Click += (s, e) => SnoozeAlerts();
+            contextMenu.Items.Add(_snoozeMenuItem);
+            var countdownItem = new ToolStripMenuItem("⏱ Đếm ngược reset");
+            countdownItem.Click += (s, e) => ToggleCountdown();
+            contextMenu.Items.Add(countdownItem);
+            _syncPauseMenuItem = new ToolStripMenuItem("⏸ Tạm dừng sync");
+            _syncPauseMenuItem.Click += (s, e) => ToggleSyncPause();
+            contextMenu.Items.Add(_syncPauseMenuItem);
+            contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
             contextMenu.Items.Add("❌ Thoát", null, (s, e) => ExitApplication());
 
@@ -202,7 +231,7 @@ namespace ClaudeUsageTracker
             };
         }
 
-        private Icon CreateClaudeIcon(Color accentColor)
+        private Icon CreateClaudeIcon(Color accentColor, int pct = -1)
         {
             try
             {
@@ -212,26 +241,45 @@ namespace ClaudeUsageTracker
                 g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
                 g.Clear(Color.Transparent);
 
-                // Dark background circle
                 using var bgBrush = new SolidBrush(Color.FromArgb(255, 30, 30, 46));
                 g.FillEllipse(bgBrush, 1, 1, 30, 30);
 
-                // Gauge arc 270° from bottom-left, color = usage level
                 using var arcPen = new Pen(accentColor, 3.5f);
                 arcPen.StartCap = System.Drawing.Drawing2D.LineCap.Round;
                 arcPen.EndCap   = System.Drawing.Drawing2D.LineCap.Round;
                 g.DrawArc(arcPen, 5, 5, 22, 22, -225f, 270f);
 
-                // "%" in Catppuccin text color
                 using var textBrush = new SolidBrush(Color.FromArgb(220, 205, 214, 244));
-                using var font = new Font("Segoe UI", 10f, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
+                string text;
+                float fontSize;
+                if (pct < 0 || pct > 999)
+                {
+                    text = "%";
+                    fontSize = 10f;
+                }
+                else if (pct >= 100)
+                {
+                    text = $"{pct}";
+                    fontSize = 7f;
+                }
+                else if (pct >= 10)
+                {
+                    text = $"{pct}";
+                    fontSize = 10f;
+                }
+                else
+                {
+                    text = $"{pct}";
+                    fontSize = 12f;
+                }
+
+                using var font = new Font("Segoe UI", fontSize, System.Drawing.FontStyle.Bold, GraphicsUnit.Pixel);
                 var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
-                g.DrawString("%", font, textBrush, new RectangleF(0, 0, 32, 32), sf);
+                g.DrawString(text, font, textBrush, new RectangleF(0, 0, 32, 32), sf);
 
                 var hIcon = bmp.GetHicon();
                 try
                 {
-                    // Clone rồi huỷ HICON gốc, nếu không mỗi lần đổi icon sẽ rò rỉ một GDI handle.
                     using var tmp = Icon.FromHandle(hIcon);
                     return (Icon)tmp.Clone();
                 }
@@ -253,18 +301,18 @@ namespace ClaudeUsageTracker
         {
             Dispatcher.Invoke(async () =>
             {
+                _lastClaudeSeenAt = DateTime.Now;
+                _apiSync.Paused = false;
+                if (_syncPauseMenuItem != null) _syncPauseMenuItem.Text = "⏸ Tạm dừng sync";
+
                 _lastUsage = await FetchUsageAsync();
                 UpdateTrayTooltip(_lastUsage);
 
-                // Step 1: Toast Notification 5s
-                var toast = new ToastNotificationWindow(_lastUsage, () =>
-                {
-                    // Step 2: Show Mini HUD Window
-                    _hud.ApplyData(_lastUsage);
-                    _hud.Show();
-                    _hud.Activate();
-                });
-                toast.Show();
+                ToastWindow.ShowToast(
+                    $"Claude khởi động · {_lastUsage.PercentUsed:0}% quota",
+                    _lastUsage.Note,
+                    "🚀",
+                    onAction: () => { _hud.ApplyData(_lastUsage!); _hud.Show(); _hud.Activate(); });
             });
         }
 
@@ -319,21 +367,28 @@ namespace ClaudeUsageTracker
         {
             var previousSnapshot = _lastUsage?.LastRefreshedAt;
 
-            _lastUsage = await FetchUsageAsync();
-            UpdateTrayTooltip(_lastUsage);
-            if (_hud.IsVisible)
+            // Auto-pause API sync khi không thấy Claude > 30 phút
+            if (_lastClaudeSeenAt != default && !_apiSync.Paused)
             {
-                _hud.ApplyData(_lastUsage);
+                if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30)
+                {
+                    _apiSync.Paused = true;
+                    if (_syncPauseMenuItem != null) _syncPauseMenuItem.Text = "▶ Tiếp tục sync";
+                }
             }
 
-            if (showFeedback && _notifyIcon != null)
+            _lastUsage = await FetchUsageAsync();
+            UpdateTrayTooltip(_lastUsage);
+            if (_hud.IsVisible) _hud.ApplyData(_lastUsage);
+            _countdownWindow?.ApplyData(_lastUsage);
+
+            if (showFeedback)
             {
-                // Làm mới chỉ đọc lại file; nói rõ có ảnh chụp mới hay chưa.
                 bool gotNewer = previousSnapshot == null || _lastUsage.LastRefreshedAt > previousSnapshot;
                 string title = gotNewer
                     ? $"Có số mới · {_lastUsage.PercentUsed:0}%"
                     : $"Chưa có số mới · vẫn {_lastUsage.PercentUsed:0}%";
-                _notifyIcon.ShowBalloonTip(2500, title, _lastUsage.Note, ToolTipIcon.Info);
+                ToastWindow.ShowToast(title, _lastUsage.Note, gotNewer ? "🔄" : "ℹ️");
             }
         }
 
@@ -354,7 +409,7 @@ namespace ClaudeUsageTracker
                 {
                     _lastIconHex = hex;
                     var oldIcon = _notifyIcon.Icon;
-                    _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex));
+                    _notifyIcon.Icon = CreateClaudeIcon(ColorFromHex(hex), (int)Math.Round(info.PercentUsed));
                     oldIcon?.Dispose();
                 }
             }
@@ -367,7 +422,10 @@ namespace ClaudeUsageTracker
         {
             if (_notifyIcon == null) return;
             _balloonIsUpdate = isUpdate;
-            _notifyIcon.ShowBalloonTip(6000, title, text, icon);
+            string toastIcon = icon == ToolTipIcon.Error ? "🔴"
+                             : icon == ToolTipIcon.Warning ? "🟡" : "ℹ️";
+            ToastWindow.ShowToast(title, text, toastIcon,
+                onAction: isUpdate && _availableUpdate != null ? () => _ = PromptAndApplyUpdateAsync() : null);
         }
 
         private async Task CheckForUpdateAsync(bool manual, TimeSpan? delay = null)
@@ -505,6 +563,7 @@ namespace ClaudeUsageTracker
             {
                 ConfigService.Save(_config);
                 try { _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey); } catch { }
+                try { _hotkeyStats?.Reregister(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey); } catch { }
                 if (_hudMenuItem != null)
                     _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
                 // Nếu vừa cấu hình SessionKey, sync API ngay lập tức
@@ -514,16 +573,73 @@ namespace ClaudeUsageTracker
             }
         }
 
+        private void SnoozeAlerts()
+        {
+            _snoozeUntil = DateTime.Now.AddHours(1);
+            if (_snoozeMenuItem != null) _snoozeMenuItem.Text = "🔕 Tắt thông báo (đến " + _snoozeUntil.ToString("HH:mm") + ")";
+            ToastWindow.ShowToast("Tắt thông báo 1 giờ", $"Cảnh báo sẽ bị tạm dừng đến {_snoozeUntil:HH:mm}.", "🔕");
+        }
+
+        private void ToggleCountdown()
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (_countdownWindow != null && _countdownWindow.IsVisible)
+                {
+                    _countdownWindow.Hide();
+                    return;
+                }
+                if (_countdownWindow == null)
+                {
+                    _countdownWindow = new CountdownWindow();
+                    _countdownWindow.Closed += (s, e) => _countdownWindow = null;
+                }
+                _countdownWindow.ApplyData(_lastUsage);
+                _countdownWindow.Show();
+                _countdownWindow.Activate();
+            });
+        }
+
+        private void ToggleSyncPause()
+        {
+            _apiSync.Paused = !_apiSync.Paused;
+            if (_syncPauseMenuItem != null)
+                _syncPauseMenuItem.Text = _apiSync.Paused ? "▶ Tiếp tục sync" : "⏸ Tạm dừng sync";
+            if (!_apiSync.Paused)
+            {
+                _lastClaudeSeenAt = DateTime.Now;
+                _ = _apiSync.SyncOnceAsync(_config);
+            }
+        }
+
+        private async Task PostWebhookAsync(string url, string title, string message)
+        {
+            try
+            {
+                // Discord webhook: {"content": "..."} ; generic: same format works for most
+                string payload = $"{{\"content\":\"**{title}**\\n{message}\"}}";
+                using var content = new StringContent(payload, Encoding.UTF8, "application/json");
+                await _webhookHttp.PostAsync(url, content);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Webhook] POST failed: {ex.Message}");
+            }
+        }
+
         private void ExitApplication()
         {
             _tick?.Stop();
             _updateTimer?.Stop();
             _hotkey?.Dispose();
+            _hotkeyStats?.Dispose();
             _apiSync?.Dispose();
+            _webhookHttp.Dispose();
             _watcherService.Dispose();
             _fileWatcherService.Dispose();
             _foregroundWatcher.Dispose();
             _statsWindow?.Close();
+            _countdownWindow?.Close();
             if (_hud != null)
             {
                 _hud.AllowRealClose = true;
