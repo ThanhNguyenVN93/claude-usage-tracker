@@ -6,6 +6,9 @@ namespace ClaudeUsageTracker.Services
 {
     public class AppConfig
     {
+        // sessionKey từ cookie claude.ai (sk-ant-sid...) — dùng để sync quota thời gian thực
+        public string SessionKey { get; set; } = string.Empty;
+        public int ApiSyncIntervalSeconds { get; set; } = 300;
         public int CheckIntervalSeconds { get; set; } = 2;
         public int StaleThresholdMinutes { get; set; } = 15;
         public bool EnableAlerts { get; set; } = true;
@@ -15,6 +18,8 @@ namespace ClaudeUsageTracker.Services
         public bool EnableEstimate { get; set; } = true;
         public double DivergenceThreshold { get; set; } = 4;
         public bool EnableResetReminder { get; set; } = true;
+        // Chỉ kiểm tra và thông báo; tải về luôn phải hỏi người dùng trước.
+        public bool EnableUpdateCheck { get; set; } = true;
         // Sửa cấu hình của app khác (Claude Code) nên mặc định TẮT.
         public bool EnableAutoModel { get; set; } = false;
         public double AutoModelSonnetAt { get; set; } = 85;

@@ -284,6 +284,180 @@ Console.WriteLine("ModelSwitchService + ClaudeSettingsFile");
     Directory.Delete(dir, true);
 }
 
+Console.WriteLine("UpdateLogic");
+{
+    Check("parse 'v0.3.0'", UpdateLogic.ParseVersion("v0.3.0") == new Version(0, 3, 0));
+    Check("parse '1.2.3' (không có v)", UpdateLogic.ParseVersion("1.2.3") == new Version(1, 2, 3));
+    Check("tag lạ bị từ chối", UpdateLogic.ParseVersion("v1.2") == null && UpdateLogic.ParseVersion("nightly") == null && UpdateLogic.ParseVersion("v1.2.3-beta") == null && UpdateLogic.ParseVersion(null) == null);
+    Check("0.10.0 > 0.9.0 (so số, không so chuỗi)", UpdateLogic.IsNewer(new Version(0, 9, 0, 0), new Version(0, 10, 0)));
+    Check("cùng bản: không coi là mới", !UpdateLogic.IsNewer(new Version(0, 3, 0, 0), new Version(0, 3, 0)));
+    Check("bản cũ hơn: không coi là mới", !UpdateLogic.IsNewer(new Version(0, 3, 0, 0), new Version(0, 2, 9)));
+
+    const string prefix = "https://github.com/o/r/releases/download/";
+    string Json(string tag, string zipUrl, string sumsUrl, bool draft = false, bool pre = false, string? zipName = null)
+        => $"{{\"tag_name\":\"{tag}\",\"draft\":{draft.ToString().ToLower()},\"prerelease\":{pre.ToString().ToLower()},\"html_url\":\"https://github.com/o/r/releases/tag/{tag}\",\"body\":\"ghi chú\",\"assets\":[" +
+           $"{{\"name\":\"{zipName ?? $"ClaudeUsageTracker-{tag}-win-x64.zip"}\",\"browser_download_url\":\"{zipUrl}\"}}," +
+           $"{{\"name\":\"SHA256SUMS.txt\",\"browser_download_url\":\"{sumsUrl}\"}}]}}";
+
+    var ok = UpdateLogic.ParseRelease(Json("v0.3.0", prefix + "v0.3.0/ClaudeUsageTracker-v0.3.0-win-x64.zip", prefix + "v0.3.0/SHA256SUMS.txt"), prefix);
+    Check("parse release hợp lệ", ok != null && ok.Version == new Version(0, 3, 0) && ok.ZipName == "ClaudeUsageTracker-v0.3.0-win-x64.zip" && ok.Notes == "ghi chú");
+    Check("asset trỏ ra domain lạ: từ chối",
+        UpdateLogic.ParseRelease(Json("v0.3.0", "https://evil.example/x.zip", prefix + "v0.3.0/SHA256SUMS.txt"), prefix) == null);
+    Check("draft bị bỏ qua", UpdateLogic.ParseRelease(Json("v0.3.0", prefix + "a.zip", prefix + "b", draft: true), prefix) == null);
+    Check("prerelease bị bỏ qua", UpdateLogic.ParseRelease(Json("v0.3.0", prefix + "a.zip", prefix + "b", pre: true), prefix) == null);
+    Check("tên zip không khớp phiên bản tag: từ chối",
+        UpdateLogic.ParseRelease(Json("v0.3.0", prefix + "a.zip", prefix + "b", zipName: "ClaudeUsageTracker-v0.2.0-win-x64.zip"), prefix) == null);
+    Check("JSON hỏng không làm sập", UpdateLogic.ParseRelease("{ không phải json", prefix) == null);
+
+    string h = new string('a', 64);
+    Check("SHA256SUMS dạng LF", UpdateLogic.ParseSha256($"{h}  f.zip\n", "f.zip") == h);
+    Check("SHA256SUMS dạng CRLF", UpdateLogic.ParseSha256($"{h}  f.zip\r\n", "f.zip") == h);
+    Check("SHA256SUMS thiếu tên file: null", UpdateLogic.ParseSha256($"{h}  khac.zip\n", "f.zip") == null);
+    Check("băm không đủ 64 ký tự: null", UpdateLogic.ParseSha256("abc  f.zip\n", "f.zip") == null);
+
+    string tmp = Path.Combine(Path.GetTempPath(), $"upd_{Guid.NewGuid():N}");
+    Directory.CreateDirectory(tmp);
+
+    byte[] fakeExe = new byte[2048]; fakeExe[0] = (byte)'M'; fakeExe[1] = (byte)'Z'; new Random(1).NextBytes(fakeExe.AsSpan(2));
+    string MakeZip(string name, params (string entry, byte[] data)[] entries)
+    {
+        string path = Path.Combine(tmp, name);
+        using var fs = File.Create(path);
+        using var za = new System.IO.Compression.ZipArchive(fs, System.IO.Compression.ZipArchiveMode.Create);
+        foreach (var (entry, data) in entries)
+        {
+            var e = za.CreateEntry(entry);
+            using var s = e.Open();
+            s.Write(data);
+        }
+        return path;
+    }
+
+    string good = MakeZip("good.zip", ("ClaudeUsageTracker.exe", fakeExe), ("README.md", new byte[] { 1, 2, 3 }));
+    string extracted = UpdateLogic.ExtractExe(good, Path.Combine(tmp, "out1"));
+    Check("giải nén đúng file exe", File.ReadAllBytes(extracted).SequenceEqual(fakeExe) && Path.GetFileName(extracted) == "ClaudeUsageTracker.exe");
+
+    bool Throws(Action a) { try { a(); return false; } catch (InvalidDataException) { return true; } }
+    Check("zip không có exe: từ chối", Throws(() => UpdateLogic.ExtractExe(MakeZip("noexe.zip", ("README.md", new byte[] { 1 })), Path.Combine(tmp, "out2"))));
+    Check("zip có exe nằm trong thư mục con (path lạ): từ chối",
+        Throws(() => UpdateLogic.ExtractExe(MakeZip("nested.zip", ("sub/ClaudeUsageTracker.exe", fakeExe)), Path.Combine(tmp, "out3"))));
+    Check("zip path traversal ../: không ghi ra ngoài",
+        Throws(() => UpdateLogic.ExtractExe(MakeZip("trav.zip", ("../ClaudeUsageTracker.exe", fakeExe)), Path.Combine(tmp, "out4"))) && !File.Exists(Path.Combine(tmp, "ClaudeUsageTracker.exe")));
+    Check("file 'exe' không phải MZ: từ chối",
+        Throws(() => UpdateLogic.ExtractExe(MakeZip("notmz.zip", ("ClaudeUsageTracker.exe", new byte[] { 1, 2, 3, 4 })), Path.Combine(tmp, "out5"))));
+
+    string hashZip = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(good))).ToLower();
+    Check("verify SHA-256 đúng", UpdateLogic.VerifySha256(good, hashZip));
+    Check("verify SHA-256 sai", !UpdateLogic.VerifySha256(good, new string('0', 64)));
+
+    // Thay file exe: đổi tên bản cũ thành .old, chép bản mới vào
+    string cur = Path.Combine(tmp, "app.exe");
+    File.WriteAllText(cur, "OLD");
+    string staged = Path.Combine(tmp, "staged.exe");
+    File.WriteAllText(staged, "NEW");
+    UpdateLogic.SwapExecutable(cur, staged);
+    Check("swap: đường dẫn cũ giờ là bản mới, bản cũ giữ ở .old", File.ReadAllText(cur) == "NEW" && File.ReadAllText(cur + ".old") == "OLD");
+    UpdateLogic.CleanupOld(cur);
+    Check("dọn .old", !File.Exists(cur + ".old"));
+
+    // Lỗi giữa chừng phải hoàn tác, không để mất file đang chạy
+    string cur2 = Path.Combine(tmp, "app2.exe");
+    File.WriteAllText(cur2, "OLD2");
+    bool swapThrew = false;
+    try { UpdateLogic.SwapExecutable(cur2, Path.Combine(tmp, "khong-ton-tai.exe")); } catch { swapThrew = true; }
+    Check("swap lỗi: ném ngoại lệ và hoàn tác bản cũ", swapThrew && File.ReadAllText(cur2) == "OLD2");
+
+    // ===== Luồng đầy đủ qua HTTP cục bộ =====
+    Console.WriteLine("UpdateService (server HTTP giả ở 127.0.0.1)");
+    int port;
+    { var l = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Loopback, 0); l.Start(); port = ((System.Net.IPEndPoint)l.LocalEndpoint).Port; l.Stop(); }
+    string origin = $"http://127.0.0.1:{port}";
+
+    string zipName = "ClaudeUsageTracker-v0.3.0-win-x64.zip";
+    string serveSums = $"{hashZip}  {zipName}\n";
+    byte[] zipBytes = File.ReadAllBytes(good);
+
+    var server = new System.Net.HttpListener();
+    server.Prefixes.Add(origin + "/");
+    server.Start();
+    var cts = new CancellationTokenSource();
+    var loop = Task.Run(async () =>
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            System.Net.HttpListenerContext ctx;
+            try { ctx = await server.GetContextAsync(); } catch { break; }
+            string p = ctx.Request.Url!.AbsolutePath;
+            byte[] body; string type = "application/octet-stream";
+            if (p == "/releases/latest")
+            {
+                type = "application/json";
+                body = System.Text.Encoding.UTF8.GetBytes(Json("v0.3.0", $"{origin}/dl/{zipName}", $"{origin}/dl/SHA256SUMS.txt"));
+            }
+            else if (p == $"/dl/{zipName}") body = zipBytes;
+            else if (p == "/dl/SHA256SUMS.txt") body = System.Text.Encoding.UTF8.GetBytes(serveSums);
+            else { ctx.Response.StatusCode = 404; ctx.Response.Close(); continue; }
+            ctx.Response.ContentType = type;
+            ctx.Response.OutputStream.Write(body);
+            ctx.Response.Close();
+        }
+    });
+
+    var opts = new UpdateOptions(origin, origin + "/");
+    var svc = new UpdateService(new Version(0, 2, 0, 0), opts);
+    var rel = svc.CheckAsync().GetAwaiter().GetResult();
+    Check("CheckAsync: thấy v0.3.0 mới hơn 0.2.0", rel != null && rel.Tag == "v0.3.0");
+
+    var stagedExe = svc.DownloadAndStageAsync(rel!).GetAwaiter().GetResult();
+    Check("DownloadAndStage: tải, kiểm băm, giải nén đúng", File.Exists(stagedExe) && File.ReadAllBytes(stagedExe).SequenceEqual(fakeExe));
+    try { Directory.Delete(Path.GetDirectoryName(Path.GetDirectoryName(stagedExe))!, true); } catch { }
+
+    Check("CheckAsync: đang ở 0.3.0 thì không có bản mới", new UpdateService(new Version(0, 3, 0, 0), opts).CheckAsync().GetAwaiter().GetResult() == null);
+
+    serveSums = $"{new string('0', 64)}  {zipName}\n"; // server trả băm sai => phải từ chối
+    bool tamper = false;
+    try { svc.DownloadAndStageAsync(rel!).GetAwaiter().GetResult(); } catch (InvalidDataException) { tamper = true; }
+    Check("băm sai (file bị tráo): từ chối, không giải nén", tamper);
+
+    serveSums = "không có dòng nào hợp lệ\n";
+    bool nohash = false;
+    try { svc.DownloadAndStageAsync(rel!).GetAwaiter().GetResult(); } catch (InvalidDataException) { nohash = true; }
+    Check("SHA256SUMS không có băm cho file: từ chối", nohash);
+
+    Check("UpdateOptions: biến môi trường chỉ nhận localhost",
+        UpdateOptions.FromEnvironment().ApiBase == UpdateOptions.DefaultApiBase);
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_UPDATE_API", "https://evil.example/api");
+    Check("biến môi trường trỏ ra ngoài bị bỏ qua", UpdateOptions.FromEnvironment().ApiBase == UpdateOptions.DefaultApiBase);
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_UPDATE_API", null);
+
+    cts.Cancel();
+    server.Stop();
+    Directory.Delete(tmp, true);
+}
+
+Console.WriteLine("ErrorLog");
+{
+    string dir = Path.Combine(Path.GetTempPath(), $"errlog_{Guid.NewGuid():N}");
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR", dir);
+
+    ErrorLog.Write("ngữ cảnh thử", new InvalidOperationException("lỗi thử nghiệm"));
+    string text = File.Exists(ErrorLog.PathOnDisk) ? File.ReadAllText(ErrorLog.PathOnDisk) : "";
+    Check("ghi lỗi ra file kèm ngữ cảnh và stack", text.Contains("ngữ cảnh thử") && text.Contains("lỗi thử nghiệm"));
+
+    File.WriteAllText(ErrorLog.PathOnDisk, new string('x', 300 * 1024));
+    ErrorLog.Write("sau khi phình", new Exception("lần ghi mới"));
+    Check("file quá lớn thì xoay vòng sang .old", File.Exists(ErrorLog.PathOnDisk + ".old") && new FileInfo(ErrorLog.PathOnDisk).Length < 10 * 1024);
+
+    // thư mục đích không ghi được: không được ném ngoại lệ
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR", Path.Combine(dir, "x", "NUL:"));
+    bool threw = false;
+    try { ErrorLog.Write("không ghi được", new Exception("x")); } catch { threw = true; }
+    Check("ghi log thất bại: không ném tiếp", !threw);
+
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR", null);
+    try { Directory.Delete(dir, true); } catch { }
+}
+
 Console.WriteLine("HistoryService");
 {
     string dir = Path.Combine(Path.GetTempPath(), $"hist_test_{Guid.NewGuid():N}");

@@ -49,8 +49,19 @@ namespace ClaudeUsageTracker.Views
                 DrawChart();
             };
 
-            // Giống toast: tự đóng khi người dùng bấm sang chỗ khác.
-            Deactivated += (s, e) => Close();
+            // Giống toast: tự đóng khi người dùng bấm sang chỗ khác. Phải chặn gọi Close() lần hai:
+            // bấm ✕ cũng làm cửa sổ mất focus ngay trong lúc đang đóng, và Close() lúc đó sẽ ném
+            // InvalidOperationException (đã từng làm sập cả tool).
+            bool closing = false;
+            Closing += (s, e) => closing = true;
+            Deactivated += (s, e) =>
+            {
+                if (closing) return;
+                Dispatcher.BeginInvoke(new Action(() =>
+                {
+                    if (!closing && IsLoaded) Close();
+                }));
+            };
         }
 
         private static SolidColorBrush Brush(string hex) =>
@@ -65,7 +76,7 @@ namespace ClaudeUsageTracker.Views
             {
                 BurnPanel.Children.Add(new TextBlock
                 {
-                    Text = "Chưa có dữ liệu — cần dùng Claude Code CLI với statusline.js đã cài.",
+                    Text = "Chưa có dữ liệu theo model — cần Claude Code CLI với statusline.js (API claude.ai không trả per-model). Biểu đồ lịch sử ở dưới vẫn hiện nếu đã sync API.",
                     FontSize = 11, Foreground = Brush("#6C7086"), TextWrapping = TextWrapping.Wrap
                 });
                 return;
@@ -109,7 +120,7 @@ namespace ClaudeUsageTracker.Views
 
             BurnPanel.Children.Add(new TextBlock
             {
-                Text = $"Tổng ≈ {report.TotalPercent:0}% quota 5h đã tiêu qua CLI trong {(_burn7d ? "7 ngày" : "24 giờ")}",
+                Text = $"Tổng ≈ {report.TotalPercent:0}% quota 5h đã tiêu (tính từ CLI) trong {(_burn7d ? "7 ngày" : "24 giờ")}",
                 FontSize = 10, Foreground = Brush("#6C7086"), Margin = new Thickness(0, 4, 0, 0)
             });
         }

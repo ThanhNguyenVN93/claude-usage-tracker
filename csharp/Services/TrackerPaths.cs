@@ -23,6 +23,7 @@ namespace ClaudeUsageTracker.Services
         public static string CliHistory => Path.Combine(DataDir, "cli-history.jsonl");
         public static string AlertState => Path.Combine(DataDir, "alert-state.json");
         public static string ModelSwitch => Path.Combine(DataDir, "model-switch.json");
+        public static string UpdateState => Path.Combine(DataDir, "update-state.json");
 
         // settings.json của Claude Code. Có thể ghi đè bằng CLAUDE_USAGE_TRACKER_SETTINGS (dùng khi kiểm thử).
         public static string ClaudeSettings
