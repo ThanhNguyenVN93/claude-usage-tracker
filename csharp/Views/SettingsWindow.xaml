@@ -111,8 +111,9 @@
             </StackPanel>
             <TextBox x:Name="TxtWebhookUrl" Background="#1E1E2E" Foreground="#CDD6F4" BorderBrush="#45475A"
                      Padding="8,6" FontSize="10" Height="30" TextWrapping="NoWrap"
-                     ToolTip="Để trống nếu không dùng. Hỗ trợ Discord webhook và generic JSON."/>
-            <TextBlock Text="Cảnh báo usage sẽ POST đến URL này ngoài toast notification."
+                     ToolTip="Để trống nếu không dùng. Bắt buộc https://. Hỗ trợ Discord webhook và generic JSON."/>
+            <TextBlock x:Name="TxtWebhookHint"
+                       Text="Cảnh báo usage sẽ POST đến URL này ngoài toast notification. Bắt buộc https://."
                        FontSize="10" FontStyle="Italic" Foreground="#6C7086" Margin="0,3,0,14" TextWrapping="Wrap"/>
 
             <Rectangle Height="1" Fill="#313244" Margin="0,0,0,14"/>

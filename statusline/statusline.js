@@ -55,7 +55,20 @@ process.stdin.on('end', () => {
       let prev = null;
       try { prev = JSON.parse(fs.readFileSync(outFile, 'utf8')); } catch (e) { prev = null; }
 
-      fs.writeFileSync(outFile, JSON.stringify(payload));
+      // Claude Code có lúc gửi used_percentage mà không kèm resets_at. Ghi đè bằng null
+      // là xoá mất mốc reset mà tool (hoặc lần render trước) đã lấy được.
+      if (payload.fiveHourResetsAt == null && prev && prev.fiveHourResetsAt != null) {
+        payload.fiveHourResetsAt = prev.fiveHourResetsAt;
+      }
+      if (payload.sevenDayResetsAt == null && prev && prev.sevenDayResetsAt != null) {
+        payload.sevenDayResetsAt = prev.sevenDayResetsAt;
+      }
+
+      // Ghi qua file tạm rồi rename: tool tray đọc cùng file này, ghi thẳng thì nó
+      // có thể bắt được nội dung cụt giữa chừng.
+      const tmpFile = outFile + '.tmp';
+      fs.writeFileSync(tmpFile, JSON.stringify(payload));
+      fs.renameSync(tmpFile, outFile);
 
       const same = prev
         && prev.model === payload.model

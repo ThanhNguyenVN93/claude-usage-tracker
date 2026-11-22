@@ -155,11 +155,25 @@ namespace ClaudeUsageTracker.Views
                 _config.StatsHotkeyVirtualKey = _pendingStatsVk;
             }
 
-            _config.WebhookUrl = TxtWebhookUrl.Text.Trim();
+            // Chặn ngay tại đây và nói rõ lý do: App chỉ POST qua https, nếu lặng lẽ bỏ
+            // thì người dùng cấu hình xong mà không bao giờ nhận được cảnh báo nào.
+            string webhook = TxtWebhookUrl.Text.Trim();
+            if (webhook.Length > 0 && !IsHttpsUrl(webhook))
+            {
+                TxtWebhookHint.Text = "✖ Webhook phải là URL https:// hợp lệ (số liệu usage là dữ liệu riêng tư).";
+                TxtWebhookHint.Foreground = new SolidColorBrush(
+                    System.Windows.Media.Color.FromRgb(0xEF, 0x44, 0x44));
+                TxtWebhookUrl.Focus();
+                return;   // không đóng hộp thoại, không lưu gì cả
+            }
+            _config.WebhookUrl = webhook;
 
             DialogResult = true;
             Close();
         }
+
+        private static bool IsHttpsUrl(string url) =>
+            Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;
 
         private void BtnCancel_Click(object sender, RoutedEventArgs e)
         {
