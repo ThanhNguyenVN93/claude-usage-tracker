@@ -110,7 +110,12 @@ namespace ClaudeUsageTracker.Services
             if (crossed.HasValue)
             {
                 var level = crossed.Value >= 95 ? AlertLevel.Critical : AlertLevel.Warn;
-                alerts.Add(new Alert($"{label}: {value:0}%", $"Đã vượt mốc {crossed.Value}%.", level));
+                string hint = crossed.Value >= 95
+                    ? " Gõ /model haiku trong Claude Code CLI để tiết kiệm quota (hoặc bật 'Tự đổi model' trong Cài đặt)."
+                    : crossed.Value >= 85
+                    ? " Gõ /model sonnet trong Claude Code CLI để tiết kiệm quota."
+                    : "";
+                alerts.Add(new Alert($"{label}: {value:0}%", $"Đã vượt mốc {crossed.Value}%.{hint}", level));
             }
         }
 

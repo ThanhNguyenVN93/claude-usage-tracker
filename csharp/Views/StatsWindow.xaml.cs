@@ -15,6 +15,7 @@ namespace ClaudeUsageTracker.Views
     public partial class StatsWindow : Window
     {
         private readonly StatsSnapshot _snap;
+        private readonly UsageInfo _info;
         private bool _burn7d;
         private bool _chart7d;
 
@@ -22,9 +23,20 @@ namespace ClaudeUsageTracker.Views
         {
             InitializeComponent();
             _snap = snapshot;
+            _info = info;
 
             TxtProjection.Text = _snap.Projection.Text;
             TxtProjection.Foreground = Brush(_snap.Projection.HitsBeforeReset ? "#EF4444" : "#CDD6F4");
+
+            if (!string.IsNullOrEmpty(info.WeeklyBudgetNote))
+            {
+                TxtWeeklyBudget.Text = $"🛡 {info.WeeklyBudgetNote}";
+                TxtWeeklyBudget.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TxtWeeklyBudget.Visibility = Visibility.Collapsed;
+            }
 
             if (_snap.ContextPercent.HasValue)
             {
@@ -45,7 +57,7 @@ namespace ClaudeUsageTracker.Views
                 UpdateLayout();   // ActualHeight có thể còn 0 nếu chưa arrange
                 var work = ScreenPlacement.WorkAreaForCursor(this);
                 Left = Math.Max(work.Left, work.Right - 16 - 340 - Width - 4);
-                Top = work.Bottom - ActualHeight - 16;
+                Top = Math.Max(work.Top, work.Bottom - ActualHeight - 16);
                 ((Storyboard)FindResource("FadeIn")).Begin(this);
                 DrawChart();
                 DrawTimeline();
@@ -63,14 +75,27 @@ namespace ClaudeUsageTracker.Views
 
         private void RenderBurn()
         {
-            BurnPanel.Children.Clear();
-            var report = _burn7d ? _snap.Burn7d : _snap.Burn24h;
+            var modelReport = _burn7d ? _snap.Burn7d : _snap.Burn24h;
+            RenderBurnBars(
+                BurnPanel, modelReport, "#FAB387",
+                "Chưa có dữ liệu theo model — cần Claude Code CLI với statusline.js.",
+                $"Tổng ≈ {modelReport.TotalPercent:0}% quota 5h đã tiêu (tính từ CLI) trong {(_burn7d ? "7 ngày" : "24 giờ")}");
 
+            var projReport = _burn7d ? _snap.ProjectBurn7d : _snap.ProjectBurn24h;
+            RenderBurnBars(
+                ProjectBurnPanel, projReport, "#89B4FA",
+                "Chưa có dữ liệu theo thư mục dự án (cần cập nhật statusline.js mới).",
+                null);
+        }
+
+        private static void RenderBurnBars(System.Windows.Controls.Panel targetPanel, ModelBurnReport report, string fillHex, string emptyMsg, string? footer)
+        {
+            targetPanel.Children.Clear();
             if (!report.HasData)
             {
-                BurnPanel.Children.Add(new TextBlock
+                targetPanel.Children.Add(new TextBlock
                 {
-                    Text = "Chưa có dữ liệu theo model — cần Claude Code CLI với statusline.js (API claude.ai không trả per-model). Biểu đồ lịch sử ở dưới vẫn hiện nếu đã sync API.",
+                    Text = emptyMsg,
                     FontSize = 11, Foreground = Brush("#6C7086"), TextWrapping = TextWrapping.Wrap
                 });
                 return;
@@ -86,15 +111,15 @@ namespace ClaudeUsageTracker.Views
                 row.Children.Add(new TextBlock
                 {
                     Text = item.Model, FontSize = 11, Foreground = Brush("#CDD6F4"),
-                    VerticalAlignment = System.Windows.VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis
+                    VerticalAlignment = System.Windows.VerticalAlignment.Center, TextTrimming = TextTrimming.CharacterEllipsis,
+                    ToolTip = item.Model
                 });
 
-                // Thanh tỉ lệ: chia theo star nên không cần đo kích thước.
                 var bar = new Grid { Margin = new Thickness(4, 0, 6, 0), Height = 8, VerticalAlignment = System.Windows.VerticalAlignment.Center };
                 double share = Math.Clamp(item.Share, 0.02, 1.0);
                 bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(share, GridUnitType.Star) });
                 bar.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(Math.Max(1 - share, 0.0001), GridUnitType.Star) });
-                var fill = new Border { Background = Brush("#FAB387"), CornerRadius = new CornerRadius(4) };
+                var fill = new Border { Background = Brush(fillHex), CornerRadius = new CornerRadius(4) };
                 bar.Children.Add(new Border { Background = Brush("#313244"), CornerRadius = new CornerRadius(4) });
                 bar.Children.Add(fill);
                 Grid.SetColumnSpan(bar.Children[0], 2);
@@ -109,14 +134,17 @@ namespace ClaudeUsageTracker.Views
                 Grid.SetColumn(pct, 2);
                 row.Children.Add(pct);
 
-                BurnPanel.Children.Add(row);
+                targetPanel.Children.Add(row);
             }
 
-            BurnPanel.Children.Add(new TextBlock
+            if (!string.IsNullOrEmpty(footer))
             {
-                Text = $"Tổng ≈ {report.TotalPercent:0}% quota 5h đã tiêu (tính từ CLI) trong {(_burn7d ? "7 ngày" : "24 giờ")}",
-                FontSize = 10, Foreground = Brush("#6C7086"), Margin = new Thickness(0, 4, 0, 0)
-            });
+                targetPanel.Children.Add(new TextBlock
+                {
+                    Text = footer,
+                    FontSize = 10, Foreground = Brush("#6C7086"), Margin = new Thickness(0, 4, 0, 0)
+                });
+            }
         }
 
         private void RenderRangeButtons()
@@ -277,5 +305,84 @@ namespace ClaudeUsageTracker.Views
         }
 
         private void BtnClose_Click(object sender, RoutedEventArgs e) => Close();
+
+        private void BtnExportReport_Click(object sender, RoutedEventArgs e)
+        {
+            var dlg = new Microsoft.Win32.SaveFileDialog
+            {
+                Title = "Xuất báo cáo sử dụng Claude",
+                FileName = $"claude-usage-report-{DateTime.Now:yyyy-MM-dd}.md",
+                Filter = "Markdown (*.md)|*.md|CSV (*.csv)|*.csv",
+                DefaultExt = ".md"
+            };
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                bool isCsv = dlg.FileName.EndsWith(".csv", StringComparison.OrdinalIgnoreCase);
+                var sb = new System.Text.StringBuilder();
+                if (isCsv)
+                {
+                    sb.AppendLine("Category,Name,Window,QuotaPercent,SharePercent");
+                    foreach (var m in _snap.Burn24h.Items)
+                        sb.AppendLine($"Model,\"{CsvField(m.Model)}\",24h,{m.Percent:0.0},{m.Share * 100:0.0}");
+                    foreach (var m in _snap.Burn7d.Items)
+                        sb.AppendLine($"Model,\"{CsvField(m.Model)}\",7d,{m.Percent:0.0},{m.Share * 100:0.0}");
+                    foreach (var p in _snap.ProjectBurn24h.Items)
+                        sb.AppendLine($"Project,\"{CsvField(p.Model)}\",24h,{p.Percent:0.0},{p.Share * 100:0.0}");
+                    foreach (var p in _snap.ProjectBurn7d.Items)
+                        sb.AppendLine($"Project,\"{CsvField(p.Model)}\",7d,{p.Percent:0.0},{p.Share * 100:0.0}");
+                }
+                else
+                {
+                    sb.AppendLine($"# Báo cáo sử dụng Claude — {DateTime.Now:dd/MM/yyyy HH:mm}");
+                    sb.AppendLine();
+                    sb.AppendLine($"- **Tài khoản**: {_info.AccountName} ({_info.Tier})");
+                    sb.AppendLine($"- **Quota chu kỳ 5h**: {_info.PercentUsed:0}% (Reset: {_info.ResetCountdown})");
+                    sb.AppendLine($"- **Quota tuần (7 ngày)**: {_info.WeeklyPercent:0}%");
+                    if (!string.IsNullOrEmpty(_info.WeeklyBudgetNote))
+                        sb.AppendLine($"- **Ngân sách tuần**: {_info.WeeklyBudgetNote}");
+                    if (_info.BurnRatePerHour is double r)
+                        sb.AppendLine($"- **Tốc độ đốt hiện tại**: {r:0}%/giờ");
+                    sb.AppendLine($"- **Dự báo**: {_snap.Projection.Text}");
+                    sb.AppendLine();
+                    AppendReportTable(sb, "Tiêu thụ theo Model (24h)", _snap.Burn24h);
+                    AppendReportTable(sb, "Tiêu thụ theo Model (7 ngày)", _snap.Burn7d);
+                    AppendReportTable(sb, "Tiêu thụ theo Dự án (24h)", _snap.ProjectBurn24h);
+                    AppendReportTable(sb, "Tiêu thụ theo Dự án (7 ngày)", _snap.ProjectBurn7d);
+                }
+
+                System.IO.File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                ToastWindow.ShowToast("✔ Đã xuất báo cáo", System.IO.Path.GetFileName(dlg.FileName), "📄");
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Không xuất được báo cáo:\n{ex.Message}", "Lỗi xuất báo cáo", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        // Tên dự án lấy từ tên thư mục (hợp lệ cả khi bắt đầu bằng =, +, -, @) — Excel/Sheets
+        // diễn giải các ô CSV bắt đầu bằng ký tự đó thành công thức (CSV injection).
+        // Thêm nháy đơn phía trước để ép về dạng văn bản, vẫn giữ nguyên nội dung hiển thị.
+        private static string CsvField(string value)
+        {
+            string escaped = value.Replace("\"", "\"\"");
+            return escaped.Length > 0 && "=+-@\t\r".IndexOf(escaped[0]) >= 0 ? "'" + escaped : escaped;
+        }
+
+        private static void AppendReportTable(System.Text.StringBuilder sb, string title, ModelBurnReport report)
+        {
+            sb.AppendLine($"## {title}");
+            if (!report.HasData)
+            {
+                sb.AppendLine("_Chưa có dữ liệu CLI._\n");
+                return;
+            }
+            sb.AppendLine("| Tên | Quota 5h tiêu thụ | Tỉ trọng |");
+            sb.AppendLine("|---|---:|---:|");
+            foreach (var item in report.Items)
+                sb.AppendLine($"| {item.Model} | {item.Percent:0.0}% | {item.Share:P1} |");
+            sb.AppendLine();
+        }
     }
 }

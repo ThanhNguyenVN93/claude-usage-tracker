@@ -56,6 +56,16 @@ namespace ClaudeUsageTracker.Services
             return RegisterHotKey(_source.Handle, _id, modifiers, vk);
         }
 
+        // Nhả tổ hợp phím hiện giữ mà không huỷ cửa sổ ẩn — dùng khi cần nhường chỗ tạm thời
+        // cho một GlobalHotkeyService khác đăng ký cùng tổ hợp (Windows chỉ cho MỘT nơi giữ mỗi tổ hợp).
+        public void Unregister()
+        {
+            if (_source != null)
+            {
+                try { UnregisterHotKey(_source.Handle, _id); } catch { }
+            }
+        }
+
         // Đổi hotkey không cần tạo lại cửa sổ. Nếu chưa từng Register (vd. lần đầu ném lỗi) thì tạo mới.
         public bool Reregister(uint modifiers, uint vk)
         {

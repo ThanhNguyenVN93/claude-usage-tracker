@@ -59,11 +59,45 @@
                     <TextBlock x:Name="TxtMessages" Text="• Đã dùng: 25 / 45 tin nhắn" FontSize="11" Foreground="#CDD6F4" Margin="0,1" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtCountdown" Text="• Đếm ngược reset: sau 2h 45m" FontSize="11" Foreground="#CDD6F4" Margin="0,1" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtWeekly" Text="" FontSize="11" Foreground="#CDD6F4" Margin="0,1" Visibility="Collapsed" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TxtBurnRate" Text="" FontSize="11" FontWeight="SemiBold" Foreground="#10B981" Margin="0,1" Visibility="Collapsed" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtExtraUsage" Text="• Dùng thêm (overage): 0%" FontSize="11" Foreground="#FAB387" Margin="0,1" Visibility="Collapsed" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtInsight" Text="" FontSize="11" Foreground="#A6ADC8" Margin="0,3,0,0"
                                TextWrapping="Wrap" Visibility="Collapsed"/>
                     <TextBlock x:Name="TxtNote" Text="ℹ Chế độ mô phỏng." FontSize="10" FontStyle="Italic" Foreground="#89B4FA" Margin="0,4,0,0" TextWrapping="Wrap"/>
                 </StackPanel>
+
+                <!-- Quick Slash Command Bar (CLI) -->
+                <Border Background="#232336" CornerRadius="6" Padding="8,5" Margin="0,8,0,0">
+                    <Grid>
+                        <TextBlock Text="⚡ Lệnh nhanh CLI:" FontSize="10" Foreground="#A6ADC8" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button x:Name="BtnQuickHaiku" Content="⚡ Haiku" Click="BtnQuickHaiku_Click"
+                                    ToolTip="Tự động gõ /model haiku vào Terminal/VS Code (Ctrl+Shift+H)"
+                                    Background="#313244" Foreground="#89B4FA" BorderThickness="0"
+                                    Padding="7,3" FontSize="10" Cursor="Hand" Margin="0,0,4,0">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                                </Button.Resources>
+                            </Button>
+                            <Button x:Name="BtnQuickCompact" Content="🧹 Compact" Click="BtnQuickCompact_Click"
+                                    ToolTip="Tự động gõ /compact vào Terminal/VS Code để dọn context (Ctrl+Shift+C)"
+                                    Background="#313244" Foreground="#FAB387" BorderThickness="0"
+                                    Padding="7,3" FontSize="10" Cursor="Hand" Margin="0,0,4,0">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                                </Button.Resources>
+                            </Button>
+                            <Button x:Name="BtnQuickClear" Content="🔄 Clear" Click="BtnQuickClear_Click"
+                                    ToolTip="Tự động gõ /clear vào Terminal/VS Code để bắt đầu phiên sạch mới"
+                                    Background="#313244" Foreground="#A6E3A1" BorderThickness="0"
+                                    Padding="7,3" FontSize="10" Cursor="Hand">
+                                <Button.Resources>
+                                    <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                                </Button.Resources>
+                            </Button>
+                        </StackPanel>
+                    </Grid>
+                </Border>
             </StackPanel>
 
             <!-- Bottom Action Footer -->

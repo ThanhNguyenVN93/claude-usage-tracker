@@ -54,14 +54,18 @@ namespace ClaudeUsageTracker.Services
             foreach (var w in _watchers) w.EnableRaisingEvents = true;
         }
 
+        private volatile bool _disposed;
+
         private void ScheduleNotify()
         {
+            if (_disposed) return;
             lock (_lock)
             {
                 _pending = true;
             }
             // Debounce 1.5s: nguồn ghi có thể ghi file nhiều lần liên tiếp.
-            _debounceTimer.Change(1500, Timeout.Infinite);
+            try { _debounceTimer.Change(1500, Timeout.Infinite); }
+            catch (ObjectDisposedException) { }
         }
 
         private void FlushPending(object? state)
@@ -76,6 +80,7 @@ namespace ClaudeUsageTracker.Services
 
         public void Dispose()
         {
+            _disposed = true;
             foreach (var w in _watchers) w.Dispose();
             _debounceTimer.Dispose();
         }
