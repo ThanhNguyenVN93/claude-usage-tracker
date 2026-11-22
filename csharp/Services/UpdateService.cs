@@ -131,6 +131,7 @@ namespace ClaudeUsageTracker.Services
             using var zip = ZipFile.OpenRead(zipPath);
 
             bool exeFound = false;
+            long totalExtracted = 0;
             foreach (var entry in zip.Entries)
             {
                 // Bỏ qua thư mục
@@ -147,6 +148,11 @@ namespace ClaudeUsageTracker.Services
 
                 if (entry.Length > MaxExeBytes) throw new InvalidDataException($"File quá lớn: {entry.Name}");
 
+                // Giới hạn từng file chưa đủ: zip nhiều file vẫn có thể làm đầy ổ đĩa.
+                totalExtracted += entry.Length;
+                if (totalExtracted > MaxZipBytes)
+                    throw new InvalidDataException("Tổng dung lượng giải nén vượt giới hạn");
+
                 using var input = entry.Open();
                 using var output = File.Create(dest);
                 input.CopyTo(output);
@@ -162,45 +168,13 @@ namespace ClaudeUsageTracker.Services
             return exePath;
         }
 
-        // Windows cho đổi tên exe đang chạy (nhưng không cho ghi đè/xoá): đổi tên bản cũ thành .old,
-        // rồi copy toàn bộ file từ staged dir (DLL, exe, ...) sang thư mục hiện tại.
-        public static void SwapExecutable(string currentPath, string stagedPath)
-        {
-            string appDir    = Path.GetFullPath(Path.GetDirectoryName(currentPath)!);
-            string stagedDir = Path.GetFullPath(Path.GetDirectoryName(stagedPath)!);
-            string old       = currentPath + ".old";
-
-            try { if (File.Exists(old)) File.Delete(old); } catch { /* .old cũ còn bị khoá: bỏ qua */ }
-
-            // Đổi tên exe cũ → .old (không thể xoá exe đang chạy, nhưng rename được)
-            File.Move(currentPath, old, overwrite: true);
-            try
-            {
-                // Copy exe mới trước (nếu lỗi thì rollback được)
-                File.Copy(stagedPath, currentPath, overwrite: false);
-
-                // Copy các file còn lại (DLL, v.v.) — overwrite vì chúng không bị khoá
-                foreach (var file in Directory.EnumerateFiles(stagedDir))
-                {
-                    string name = Path.GetFileName(file);
-                    if (name.Equals(ExeName, StringComparison.OrdinalIgnoreCase)) continue; // đã copy
-                    File.Copy(file, Path.Combine(appDir, name), overwrite: true);
-                }
-            }
-            catch
-            {
-                try { File.Move(old, currentPath, overwrite: true); } catch { /* hết cách hoàn tác */ }
-                throw;
-            }
-        }
-
         public static void CleanupOld(string currentPath)
         {
             try { File.Delete(currentPath + ".old"); } catch { /* chưa xoá được thì lần sau */ }
         }
     }
 
-    public class UpdateService
+    public class UpdateService : IDisposable
     {
         private readonly Version _current;
         private readonly UpdateOptions _options;
@@ -276,6 +250,8 @@ namespace ClaudeUsageTracker.Services
             using var fs = File.Create(path);
             await CopyLimitedAsync(stream, fs, maxBytes, ct);
         }
+
+        public void Dispose() => _http.Dispose();
 
         private static async Task CopyLimitedAsync(Stream input, Stream output, long maxBytes, CancellationToken ct)
         {

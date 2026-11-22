@@ -101,7 +101,7 @@ namespace ClaudeUsageTracker.Services
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(_statePath)!);
-                File.WriteAllText(_statePath, JsonSerializer.Serialize(_state));
+                AtomicFile.WriteAllText(_statePath, JsonSerializer.Serialize(_state));
             }
             catch { /* không lưu được thì lần sau tự suy ra lại */ }
         }

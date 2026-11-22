@@ -46,7 +46,7 @@ namespace ClaudeUsageTracker.Services
                 {
                     if (TryGetTimestamp(line, out long t) && t >= cutoff) kept.Add(line);
                 }
-                File.WriteAllLines(_cliPath, kept);
+                AtomicFile.WriteAllLines(_cliPath, kept);
             }
             catch
             {

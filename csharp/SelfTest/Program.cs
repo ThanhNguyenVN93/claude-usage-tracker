@@ -350,22 +350,12 @@ Console.WriteLine("UpdateLogic");
     Check("verify SHA-256 đúng", UpdateLogic.VerifySha256(good, hashZip));
     Check("verify SHA-256 sai", !UpdateLogic.VerifySha256(good, new string('0', 64)));
 
-    // Thay file exe: đổi tên bản cũ thành .old, chép bản mới vào
+    // Dọn .old còn sót lại của bản trước (cài đặt giờ copy sang thư mục theo version, không swap tại chỗ)
     string cur = Path.Combine(tmp, "app.exe");
-    File.WriteAllText(cur, "OLD");
-    string staged = Path.Combine(tmp, "staged.exe");
-    File.WriteAllText(staged, "NEW");
-    UpdateLogic.SwapExecutable(cur, staged);
-    Check("swap: đường dẫn cũ giờ là bản mới, bản cũ giữ ở .old", File.ReadAllText(cur) == "NEW" && File.ReadAllText(cur + ".old") == "OLD");
+    File.WriteAllText(cur, "NEW");
+    File.WriteAllText(cur + ".old", "OLD");
     UpdateLogic.CleanupOld(cur);
     Check("dọn .old", !File.Exists(cur + ".old"));
-
-    // Lỗi giữa chừng phải hoàn tác, không để mất file đang chạy
-    string cur2 = Path.Combine(tmp, "app2.exe");
-    File.WriteAllText(cur2, "OLD2");
-    bool swapThrew = false;
-    try { UpdateLogic.SwapExecutable(cur2, Path.Combine(tmp, "khong-ton-tai.exe")); } catch { swapThrew = true; }
-    Check("swap lỗi: ném ngoại lệ và hoàn tác bản cũ", swapThrew && File.ReadAllText(cur2) == "OLD2");
 
     // ===== Luồng đầy đủ qua HTTP cục bộ =====
     Console.WriteLine("UpdateService (server HTTP giả ở 127.0.0.1)");

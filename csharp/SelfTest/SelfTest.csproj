@@ -10,6 +10,7 @@
   <ItemGroup>
     <Compile Include="..\Models\UsageSample.cs" />
     <Compile Include="..\Services\TrackerPaths.cs" />
+    <Compile Include="..\Services\AtomicFile.cs" />
     <Compile Include="..\Services\HistoryService.cs" />
     <Compile Include="..\Services\StatsService.cs" />
     <Compile Include="..\Services\AlertService.cs" />

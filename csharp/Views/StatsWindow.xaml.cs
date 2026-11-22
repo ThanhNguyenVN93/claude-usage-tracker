@@ -42,6 +42,7 @@ namespace ClaudeUsageTracker.Views
             // Đặt bên trái HUD (HUD nằm góc dưới phải), căn mép dưới.
             Loaded += (s, e) =>
             {
+                UpdateLayout();   // ActualHeight có thể còn 0 nếu chưa arrange
                 var work = SystemParameters.WorkArea;
                 Left = Math.Max(work.Left, work.Right - 16 - 340 - Width - 4);
                 Top = work.Bottom - ActualHeight - 16;
@@ -65,8 +66,7 @@ namespace ClaudeUsageTracker.Views
             };
         }
 
-        private static SolidColorBrush Brush(string hex) =>
-            (SolidColorBrush)new BrushConverter().ConvertFrom(hex)!;
+        private static SolidColorBrush Brush(string hex) => BrushCache.Get(hex);
 
         private void RenderBurn()
         {

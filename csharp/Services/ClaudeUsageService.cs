@@ -9,11 +9,13 @@ namespace ClaudeUsageTracker.Services
 {
     public class ClaudeUsageService
     {
-        public static readonly string UsageHistoryPath = TrackerPaths.DesktopHistory;
+        // Property chứ không phải static readonly: TrackerPaths đọc biến môi trường mỗi lần gọi,
+        // snapshot lúc nạp type làm hai bên lệch nhau khi kiểm thử đổi biến môi trường.
+        public static string UsageHistoryPath => TrackerPaths.DesktopHistory;
 
         // Ghi bởi statusline.js (Claude Code) mỗi khi CLI render thanh trạng thái —
         // cho số liệu chính xác hơn (có giờ reset thật) khi đang dùng CLI để code.
-        public static readonly string CliUsagePath = TrackerPaths.CliUsage;
+        public static string CliUsagePath => TrackerPaths.CliUsage;
 
         private TimeSpan _staleThreshold = TimeSpan.FromMinutes(15);
 
@@ -129,7 +131,7 @@ namespace ClaudeUsageTracker.Services
             var writtenAt = DateTimeOffset.FromUnixTimeMilliseconds(writtenAtMs).LocalDateTime;
 
             string resetCountdown = "không rõ";
-            DateTime resetTime = DateTime.Now;
+            DateTime resetTime = default;
             if (root.TryGetProperty("fiveHourResetsAt", out var resetEl) && resetEl.ValueKind != JsonValueKind.Null)
             {
                 resetTime = DateTimeOffset.FromUnixTimeSeconds(resetEl.GetInt64()).LocalDateTime;
@@ -214,7 +216,7 @@ namespace ClaudeUsageTracker.Services
             long lastT = last.GetProperty("t").GetInt64();
             var lastUpdated = DateTimeOffset.FromUnixTimeMilliseconds(lastT).LocalDateTime;
 
-            bool desktopRunning = Process.GetProcessesByName("Claude").Length > 0;
+            bool desktopRunning = ProcessUtil.IsClaudeRunning();
             bool isStale = (DateTime.Now - lastUpdated) > _staleThreshold;
 
             string note;
@@ -240,7 +242,8 @@ namespace ClaudeUsageTracker.Services
                 WeeklyPercent = weekly,
                 MessagesRemaining = $"Tuần (7 ngày): {weekly:0}% đã dùng",
                 ResetCountdown = "xem trong Claude Desktop/claude.ai",
-                ResetTime = DateTime.Now,
+                // default = chưa biết giờ reset. DateTime.Now làm đồng hồ đếm ngược hiện "đã reset" ngay.
+                ResetTime = default,
                 IsDemo = false,
                 IsStale = isStale,
                 DesktopRunning = desktopRunning,
@@ -252,7 +255,7 @@ namespace ClaudeUsageTracker.Services
 
         private UsageInfo BuildFallbackInfo()
         {
-            bool desktopRunning = Process.GetProcessesByName("Claude").Length > 0;
+            bool desktopRunning = ProcessUtil.IsClaudeRunning();
             return new UsageInfo
             {
                 AccountName = "Claude Desktop",
@@ -260,7 +263,7 @@ namespace ClaudeUsageTracker.Services
                 PercentUsed = 0,
                 MessagesRemaining = "Chưa tìm thấy dữ liệu usage",
                 ResetCountdown = "--",
-                ResetTime = DateTime.Now,
+                ResetTime = default,
                 IsDemo = true,
                 IsStale = true,
                 DesktopRunning = desktopRunning,

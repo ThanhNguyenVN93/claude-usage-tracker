@@ -30,6 +30,24 @@ namespace ClaudeUsageTracker.Services
     public class AlertState
     {
         public Dictionary<string, DateTime> Fired { get; set; } = new();
+
+        // Trạng thái đổi mà không sinh cảnh báo (ghi mốc "đã chạm trần", gỡ mốc để tái vũ trang)
+        // vẫn phải được lưu, nếu không restart là mất và nhắc reset không bao giờ bắn.
+        [System.Text.Json.Serialization.JsonIgnore]
+        public bool Dirty { get; private set; }
+
+        public void Mark(string key, DateTime at)
+        {
+            Fired[key] = at;
+            Dirty = true;
+        }
+
+        public void Unmark(string key)
+        {
+            if (Fired.Remove(key)) Dirty = true;
+        }
+
+        public void ClearDirty() => Dirty = false;
     }
 
     // Logic thuần: nhận số liệu + trạng thái, trả về cảnh báo mới (và cập nhật trạng thái).
@@ -79,13 +97,13 @@ namespace ClaudeUsageTracker.Services
                 {
                     if (!state.Fired.ContainsKey(key))
                     {
-                        state.Fired[key] = now;
+                        state.Mark(key, now);
                         crossed = t; // nếu nhảy qua nhiều mốc cùng lúc chỉ báo mốc cao nhất
                     }
                 }
                 else if (value < t - ReArmMargin)
                 {
-                    state.Fired.Remove(key);
+                    state.Unmark(key);
                 }
             }
 
@@ -105,13 +123,13 @@ namespace ClaudeUsageTracker.Services
 
             if (value >= HitLimitAt)
             {
-                if (!state.Fired.ContainsKey(key)) state.Fired[key] = now;
+                if (!state.Fired.ContainsKey(key)) state.Mark(key, now);
                 return;
             }
 
             if (state.Fired.ContainsKey(key) && value < ResetBelow)
             {
-                state.Fired.Remove(key);
+                state.Unmark(key);
                 alerts.Add(new Alert(
                     $"{label} đã reset",
                     $"Hạn ngạch đã về {value:0}% — quay lại làm tiếp được rồi.",
@@ -126,14 +144,14 @@ namespace ClaudeUsageTracker.Services
 
             if (p == null || !p.HitsBeforeReset || input.FiveHour >= 100)
             {
-                state.Fired.Remove(key);
+                state.Unmark(key);
                 return;
             }
 
             if (state.Fired.TryGetValue(key, out var last) && input.Now - last < ProjectionCooldown)
                 return;
 
-            state.Fired[key] = input.Now;
+            state.Mark(key, input.Now);
             alerts.Add(new Alert("Sắp hết hạn ngạch 5h", p.Text, AlertLevel.Critical));
         }
 
@@ -148,7 +166,7 @@ namespace ClaudeUsageTracker.Services
             {
                 if (!state.Fired.ContainsKey(key))
                 {
-                    state.Fired[key] = input.Now;
+                    state.Mark(key, input.Now);
                     alerts.Add(new Alert(
                         $"Ngữ cảnh phiên đã {ctx:0}%",
                         "Mỗi lượt đều đọc lại toàn bộ ngữ cảnh nên rất tốn quota. Cân nhắc /compact hoặc mở phiên mới.",
@@ -157,15 +175,23 @@ namespace ClaudeUsageTracker.Services
             }
             else if (ctx < cfg.ContextWarnPercent - ContextReArmMargin)
             {
-                state.Fired.Remove(key);
+                state.Unmark(key);
             }
         }
 
+        // Chỉ "ctx:{sessionId}" mới phình vô hạn; fh/sd/hitlimit/proj là tập hữu hạn và mang ngữ nghĩa
+        // (xoá nhầm hitlimit là mất luôn nhắc reset), nên chỉ tỉa key ngữ cảnh.
         private static void PruneState(AlertState state)
         {
             if (state.Fired.Count <= MaxStateKeys) return;
-            foreach (var key in state.Fired.OrderBy(kv => kv.Value).Take(state.Fired.Count - MaxStateKeys).Select(kv => kv.Key).ToList())
-                state.Fired.Remove(key);
+
+            var ctxKeys = state.Fired.Where(kv => kv.Key.StartsWith("ctx:", StringComparison.Ordinal))
+                                     .OrderBy(kv => kv.Value)
+                                     .Select(kv => kv.Key)
+                                     .ToList();
+
+            int toRemove = state.Fired.Count - MaxStateKeys;
+            foreach (var key in ctxKeys.Take(toRemove)) state.Unmark(key);
         }
     }
 
@@ -187,7 +213,8 @@ namespace ClaudeUsageTracker.Services
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                File.WriteAllText(path, JsonSerializer.Serialize(state));
+                AtomicFile.WriteAllText(path, JsonSerializer.Serialize(state));
+                state.ClearDirty();
             }
             catch { /* không lưu được thì lần sau có thể báo lặp, chấp nhận */ }
         }

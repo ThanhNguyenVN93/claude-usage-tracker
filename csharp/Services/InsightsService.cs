@@ -43,7 +43,9 @@ namespace ClaudeUsageTracker.Services
             var input = new AlertInput(info.PercentUsed, info.WeeklyPercent, info.ContextPercent, info.SessionId, projection, now);
             var alerts = AlertEngine.Evaluate(input, BuildAlertConfig(), _state);
 
-            if (alerts.Count > 0) AlertStateStore.Save(TrackerPaths.AlertState, _state);
+            // Lưu theo trạng thái đổi, không theo số cảnh báo: "đã chạm trần" và các lần tái vũ trang
+            // không sinh cảnh báo nào nhưng vẫn phải sống sót qua restart.
+            if (_state.Dirty) AlertStateStore.Save(TrackerPaths.AlertState, _state);
             return alerts;
         }
 

@@ -97,7 +97,11 @@ namespace ClaudeUsageTracker.Services
 
                 while (!token.IsCancellationRequested)
                 {
-                    try { await Task.Delay(interval, token); } catch (TaskCanceledException) { break; }
+                    // CTS có thể bị Dispose ngay sau Cancel (StartBackground gọi lại từ Settings):
+                    // Delay khi đó ném ObjectDisposedException chứ không phải TaskCanceled.
+                    try { await Task.Delay(interval, token); }
+                    catch (OperationCanceledException) { break; }
+                    catch (ObjectDisposedException) { break; }
                     await SyncOnceAsync(config);
                 }
             }, token);
@@ -287,7 +291,7 @@ namespace ClaudeUsageTracker.Services
                 w.WriteEndObject();
                 w.Flush();
 
-                File.WriteAllBytes(TrackerPaths.CliUsage, ms.ToArray());
+                AtomicFile.WriteAllBytes(TrackerPaths.CliUsage, ms.ToArray());
             }
             catch (Exception ex)
             {
@@ -332,7 +336,7 @@ namespace ClaudeUsageTracker.Services
                 samplesRaw.Add(newSample);
 
                 string json = $"{{\"samples\":[{string.Join(",", samplesRaw)}]}}";
-                File.WriteAllText(path, json);
+                AtomicFile.WriteAllText(path, json);
             }
             catch (Exception ex)
             {

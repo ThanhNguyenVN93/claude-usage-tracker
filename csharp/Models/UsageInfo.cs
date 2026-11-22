@@ -5,12 +5,14 @@ namespace ClaudeUsageTracker.Models
 {
     public class UsageInfo
     {
-        public string AccountName { get; set; } = "Claude Desktop User";
-        public string Tier { get; set; } = "Claude Pro";
-        public double PercentUsed { get; set; } = 42.0;
-        public string MessagesRemaining { get; set; } = "26 / 45 tin nhắn";
-        public string ResetCountdown { get; set; } = "2h 45m";
-        public DateTime ResetTime { get; set; } = DateTime.Now.AddHours(2).AddMinutes(45);
+        // Mặc định phải trung tính: trước đây là số demo (42%, "26 / 45 tin nhắn") nên bất kỳ
+        // field nào quên gán là hiện số bịa ra như thể là dữ liệu thật.
+        public string AccountName { get; set; } = string.Empty;
+        public string Tier { get; set; } = string.Empty;
+        public double PercentUsed { get; set; }
+        public string MessagesRemaining { get; set; } = string.Empty;
+        public string ResetCountdown { get; set; } = "--";
+        public DateTime ResetTime { get; set; }        // default = chưa biết giờ reset
         public bool IsDemo { get; set; } = true;
         public string Note { get; set; } = string.Empty;
         public bool IsStale { get; set; } = false;

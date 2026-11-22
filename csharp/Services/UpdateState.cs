@@ -27,7 +27,7 @@ namespace ClaudeUsageTracker.Services
             try
             {
                 Directory.CreateDirectory(TrackerPaths.DataDir);
-                File.WriteAllText(TrackerPaths.UpdateState, JsonSerializer.Serialize(this));
+                AtomicFile.WriteAllText(TrackerPaths.UpdateState, JsonSerializer.Serialize(this));
             }
             catch { /* không lưu được thì lần sau kiểm tra lại, không sao */ }
         }

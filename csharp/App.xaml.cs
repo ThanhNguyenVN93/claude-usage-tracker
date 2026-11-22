@@ -7,6 +7,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Forms;
@@ -15,7 +16,6 @@ using ClaudeUsageTracker.Services;
 using ClaudeUsageTracker.Views;
 using Application = System.Windows.Application;
 using MessageBox = System.Windows.MessageBox;
-using Microsoft.Win32;
 
 namespace ClaudeUsageTracker
 {
@@ -54,27 +54,42 @@ namespace ClaudeUsageTracker
         [DllImport("user32.dll", SetLastError = true)]
         private static extern bool DestroyIcon(IntPtr hIcon);
 
-        private static void EnsureStartupEntry()
+        // Hai instance = hai tray icon, hai vòng sync cùng ghi đè cli-usage.json / plan-usage-history.json
+        // (SemaphoreSlim chỉ tuần tự hoá trong một process), và hotkey của instance thứ hai không đăng ký được.
+        private static Mutex? _singleInstance;
+
+        private static bool TryAcquireSingleInstance()
         {
-            const string name = "ClaudeUsageTracker";
-            string? self = Environment.ProcessPath;
-            if (self == null) return;
             try
             {
-                using var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Run", writable: true);
-                if (key == null) return;
-                string expected = $"\"{self}\"";
-                if (key.GetValue(name) as string != expected)
-                    key.SetValue(name, expected);
+                _singleInstance = new Mutex(true, @"Local\ClaudeUsageTracker.SingleInstance", out bool isFirst);
+                if (isFirst) return true;
+                _singleInstance.Dispose();
+                _singleInstance = null;
+                return false;
             }
-            catch { /* không crash nếu registry bị deny */ }
+            catch
+            {
+                // Không tạo được mutex thì cứ chạy — thà hai instance còn hơn không chạy được.
+                return true;
+            }
         }
 
         protected override async void OnStartup(StartupEventArgs e)
         {
             base.OnStartup(e);
-            EnsureStartupEntry();
+
+            if (!TryAcquireSingleInstance())
+            {
+                MessageBox.Show(
+                    "Claude Usage Tracker đã chạy rồi.\nXem icon ở khay hệ thống (bấm mũi tên ^ nếu bị ẩn).",
+                    "Claude Usage Tracker", MessageBoxButton.OK, MessageBoxImage.Information);
+                _isExiting = true;   // chặn ExitApplication đụng vào service chưa khởi tạo
+                Shutdown();
+                return;
+            }
+
+            AutoStartService.SyncPathIfEnabled();
 
             // Lưới an toàn: lỗi giao diện/async không lường trước chỉ được ghi log chứ không giết cả tool nền.
             DispatcherUnhandledException += (s, ev) =>
@@ -114,7 +129,7 @@ namespace ClaudeUsageTracker
 
             _lastUsage = await FetchUsageAsync();
             if (_isExiting) return;
-            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, _config);
+            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, OpenSettings);
             // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
             UpdateTrayTooltip(_lastUsage);
 
@@ -413,17 +428,6 @@ namespace ClaudeUsageTracker
             }, nameof(OpenStats));
         }
 
-        private static bool IsClaudeProcessRunning()
-        {
-            try
-            {
-                var procs = Process.GetProcessesByName("Claude");
-                foreach (var p in procs) p.Dispose();
-                return procs.Length > 0;
-            }
-            catch { return false; }
-        }
-
         private async Task RefreshUsageAsync(bool showFeedback = false)
         {
             var previousSnapshot = _lastUsage?.LastRefreshedAt;
@@ -433,7 +437,7 @@ namespace ClaudeUsageTracker
             {
                 // _lastClaudeSeenAt chỉ được cập nhật lúc Claude *khởi động* → nếu Claude mở liên tục > 30 phút
                 // sync bị tạm dừng nhầm. Kiểm tra tiến trình còn chạy trước khi auto-pause.
-                if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30 && IsClaudeProcessRunning())
+                if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30 && ProcessUtil.IsClaudeRunning())
                     _lastClaudeSeenAt = DateTime.Now;
 
                 if ((DateTime.Now - _lastClaudeSeenAt).TotalMinutes > 30)
@@ -721,10 +725,12 @@ namespace ClaudeUsageTracker
             _hotkey?.Dispose();
             _hotkeyStats?.Dispose();
             _apiSync?.Dispose();
+            _updater?.Dispose();
             _webhookHttp.Dispose();
-            _watcherService.Dispose();
-            _fileWatcherService.Dispose();
-            _foregroundWatcher.Dispose();
+            // ?. bắt buộc: OnStartup có thể thoát sớm (đã có instance khác) trước khi dựng xong các service.
+            _watcherService?.Dispose();
+            _fileWatcherService?.Dispose();
+            _foregroundWatcher?.Dispose();
             _statsWindow?.Close();
             _countdownWindow?.Close();
             if (_hud != null)
@@ -732,6 +738,8 @@ namespace ClaudeUsageTracker
                 _hud.AllowRealClose = true;
                 _hud.Close();
             }
+            _singleInstance?.Dispose();
+            _singleInstance = null;
             if (_notifyIcon != null)
             {
                 _notifyIcon.Visible = false;

@@ -30,6 +30,8 @@ namespace ClaudeUsageTracker.Views
 
             Loaded += (s, e) =>
             {
+                // Loaded không bảo đảm đã arrange xong: ActualWidth/Height có thể còn 0 → toast lệch góc.
+                UpdateLayout();
                 PositionBottomRight();
                 _barFullWidth = ((Border)PbFill.Parent).ActualWidth;
                 PbFill.Width = _barFullWidth;

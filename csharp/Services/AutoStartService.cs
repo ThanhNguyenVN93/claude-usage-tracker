@@ -16,6 +16,24 @@ namespace ClaudeUsageTracker.Services
             return key?.GetValue(ValueName) != null;
         }
 
+        // Cài bản mới vào thư mục khác làm Run key trỏ vào exe không còn tồn tại.
+        // Chỉ sửa đường dẫn khi mục đã có sẵn — người dùng tắt autostart thì phải giữ nguyên là tắt.
+        public static void SyncPathIfEnabled()
+        {
+            try
+            {
+                using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true);
+                if (key?.GetValue(ValueName) is not string current) return;
+
+                string? exePath = Environment.ProcessPath;
+                if (string.IsNullOrEmpty(exePath)) return;
+
+                string expected = $"\"{exePath}\"";
+                if (current != expected) key.SetValue(ValueName, expected);
+            }
+            catch { /* registry bị chặn: bỏ qua, không làm sập tool */ }
+        }
+
         public static void SetEnabled(bool enabled)
         {
             using var key = Registry.CurrentUser.OpenSubKey(RunKeyPath, writable: true)

@@ -88,7 +88,7 @@ namespace ClaudeUsageTracker.Services
                 Directory.CreateDirectory(ConfigDir);
                 var options = new JsonSerializerOptions { WriteIndented = true };
                 string json = JsonSerializer.Serialize(config, options);
-                File.WriteAllText(ConfigPath, json);
+                AtomicFile.WriteAllText(ConfigPath, json);
             }
             catch (Exception ex)
             {

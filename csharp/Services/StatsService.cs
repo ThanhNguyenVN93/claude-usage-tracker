@@ -45,7 +45,9 @@ namespace ClaudeUsageTracker.Services
                 var a = samples[i - 1];
                 var b = samples[i];
 
-                if (b.Time < from || b.Time > now) continue;
+                // Cả hai đầu phải nằm trong cửa sổ: cặp bắc qua biên sẽ quy trọn phần tiêu
+                // của khoảng thời gian trước đó vào cửa sổ này.
+                if (a.Time < from || b.Time > now) continue;
                 if (b.Model == null) continue;
                 if (b.Time - a.Time > MaxPairGap || b.Time < a.Time) continue;
 

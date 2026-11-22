@@ -12,18 +12,18 @@ namespace ClaudeUsageTracker.Views
     {
         private readonly Func<Task<UsageInfo>> _fetch;
         private readonly Action _openStats;
-        private readonly AppConfig _config;
+        private readonly Action _openSettings;
         private DateTime? _lastSnapshotAt;
 
         // Khi true, cho phép cửa sổ đóng thật (dùng lúc thoát hẳn ứng dụng).
         public bool AllowRealClose { get; set; }
 
-        public MiniHudWindow(UsageInfo info, Func<Task<UsageInfo>> fetch, Action openStats, AppConfig config)
+        public MiniHudWindow(UsageInfo info, Func<Task<UsageInfo>> fetch, Action openStats, Action openSettings)
         {
             InitializeComponent();
             _fetch = fetch;
             _openStats = openStats;
-            _config = config;
+            _openSettings = openSettings;
 
             ApplyData(info);
             PositionAtBottomRight();
@@ -65,7 +65,7 @@ namespace ClaudeUsageTracker.Views
             TxtPercent.Text = $"{info.PercentUsed:0}%";
             PbUsage.Value = info.PercentUsed;
 
-            var brush = (SolidColorBrush)new BrushConverter().ConvertFrom(info.StatusColorHex)!;
+            var brush = BrushCache.Get(info.StatusColorHex);
             TxtPercent.Foreground = brush;
             PbUsage.Foreground = brush;
 
@@ -91,9 +91,9 @@ namespace ClaudeUsageTracker.Views
             if (insight.Count > 0)
             {
                 TxtInsight.Text = string.Join(Environment.NewLine, insight);
-                TxtInsight.Foreground = (SolidColorBrush)new BrushConverter().ConvertFrom(
+                TxtInsight.Foreground = BrushCache.Get(
                     info.ConditionLevel == AlertLevel.Critical ? "#EF4444"
-                    : info.ConditionLevel == AlertLevel.Warn ? "#F59E0B" : "#A6ADC8")!;
+                    : info.ConditionLevel == AlertLevel.Warn ? "#F59E0B" : "#A6ADC8");
                 TxtInsight.Visibility = Visibility.Visible;
             }
             else
@@ -104,9 +104,8 @@ namespace ClaudeUsageTracker.Views
             if (!string.IsNullOrEmpty(info.Note))
             {
                 TxtNote.Text = info.Note.StartsWith("⚠") ? info.Note : $"ℹ {info.Note}";
-                TxtNote.Foreground = (info.IsStale || !info.DesktopRunning)
-                    ? (SolidColorBrush)new BrushConverter().ConvertFrom("#F59E0B")!
-                    : (SolidColorBrush)new BrushConverter().ConvertFrom("#6C7086")!;
+                TxtNote.Foreground = BrushCache.Get(
+                    (info.IsStale || !info.DesktopRunning) ? "#F59E0B" : "#6C7086");
                 TxtNote.Visibility = Visibility.Visible;
             }
             else
@@ -163,16 +162,8 @@ namespace ClaudeUsageTracker.Views
             _openStats();
         }
 
-        private void BtnSettings_Click(object sender, RoutedEventArgs e)
-        {
-            var settingsWnd = new SettingsWindow(_config);
-            bool saved = settingsWnd.ShowDialog() == true;
-
-            if (saved)
-            {
-                ConfigService.Save(_config);
-                BtnRefresh_Click(sender, e);
-            }
-        }
+        // Phải đi qua App.OpenSettings: chỉ đường đó mới đăng ký lại hotkey, khởi động lại vòng sync
+        // và chặn mở hai hộp thoại cùng lúc. Tự mở SettingsWindow ở đây là lưu được config nhưng không áp dụng.
+        private void BtnSettings_Click(object sender, RoutedEventArgs e) => _openSettings();
     }
 }

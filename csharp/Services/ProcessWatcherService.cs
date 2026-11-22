@@ -28,8 +28,7 @@ namespace ClaudeUsageTracker.Services
         {
             try
             {
-                var processes = Process.GetProcessesByName("Claude");
-                bool isRunning = processes.Length > 0;
+                bool isRunning = ProcessUtil.IsClaudeRunning();
 
                 // State transition: Not Running -> Running
                 if (isRunning && !_isClaudeRunning)
