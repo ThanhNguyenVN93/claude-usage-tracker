@@ -251,14 +251,18 @@ namespace ClaudeUsageTracker
 
         private void SetupNotifyIcon()
         {
+            string verStr = UpdateLogic.Normalize(CurrentVersion()).ToString(3);
             _notifyIcon = new NotifyIcon
             {
                 Icon = CreateClaudeIcon(Color.FromArgb(217, 119, 6)),
-                Text = "Claude Usage Tracker (Đang theo dõi)",
+                Text = $"Claude Usage Tracker v{verStr}",
                 Visible = true
             };
 
             var contextMenu = new ContextMenuStrip();
+            var versionItem = new ToolStripMenuItem($"Claude Usage Tracker  v{verStr}") { Enabled = false };
+            contextMenu.Items.Add(versionItem);
+            contextMenu.Items.Add(new ToolStripSeparator());
             _hudMenuItem = new ToolStripMenuItem($"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]");
             _hudMenuItem.Click += (s, e) => ToggleHud();
             contextMenu.Items.Add(_hudMenuItem);

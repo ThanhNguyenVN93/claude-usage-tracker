@@ -21,7 +21,7 @@
                 <Grid Margin="12,0">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                         <TextBlock Text="🤖" FontSize="13" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                        <TextBlock Text="CLAUDE USAGE HUD" FontSize="11" FontWeight="Bold" Foreground="#FAB387" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="TxtHudTitle" Text="CLAUDE USAGE HUD" FontSize="11" FontWeight="Bold" Foreground="#FAB387" VerticalAlignment="Center"/>
                     </StackPanel>
 
                     <Button Content="✕" HorizontalAlignment="Right" VerticalAlignment="Center"

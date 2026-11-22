@@ -51,6 +51,10 @@ namespace ClaudeUsageTracker.Views
             _openSettings = openSettings;
             _config = config;
 
+            var ver = System.Reflection.Assembly.GetEntryAssembly()?.GetName().Version;
+            if (ver != null)
+                TxtHudTitle.Text = $"CLAUDE USAGE  v{ver.Major}.{ver.Minor}.{ver.Build}";
+
             ApplyData(info);
             RestoreOrDefaultPosition();
 
