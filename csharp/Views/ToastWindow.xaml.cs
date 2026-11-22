@@ -15,6 +15,17 @@ namespace ClaudeUsageTracker.Views
         // trước đây cái sau đè cái trước ngay lập tức, người dùng không kịp đọc. Xếp hàng thay vì đè.
         private static readonly Queue<(string title, string body, string icon, Action? onAction)> Pending = new();
         private const int MaxPending = 5;
+        private static bool _shuttingDown;
+
+        // Lúc thoát, toast đang hiện bị Close() -> OnClosed -> ShowNextPending() sẽ dựng
+        // cửa sổ MỚI ngay giữa lúc Shutdown(). Chặn hẳn đường đó.
+        public static void ShutdownAll()
+        {
+            _shuttingDown = true;
+            Pending.Clear();
+            _current?.Close();
+            _current = null;
+        }
 
         private readonly DispatcherTimer _timer;
         private double _remaining;
@@ -56,6 +67,7 @@ namespace ClaudeUsageTracker.Views
 
         public static void ShowToast(string title, string body, string icon = "🔔", Action? onAction = null)
         {
+            if (_shuttingDown) return;
             if (_current != null)
             {
                 // Hàng đợi có trần: cảnh báo cũ nhất bị bỏ chứ không dồn vô hạn.
@@ -76,7 +88,7 @@ namespace ClaudeUsageTracker.Views
 
         private static void ShowNextPending()
         {
-            if (_current != null || Pending.Count == 0) return;
+            if (_shuttingDown || _current != null || Pending.Count == 0) return;
             var next = Pending.Dequeue();
             Display(next.title, next.body, next.icon, next.onAction);
         }

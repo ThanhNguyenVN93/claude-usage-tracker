@@ -39,6 +39,7 @@ namespace ClaudeUsageTracker
         private UpdateState _updateState = null!;
         private ReleaseInfo? _availableUpdate;
         private ToolStripMenuItem? _updateMenuItem;
+        private Font? _menuFont;
         private string? _lastIconHex;
         private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
@@ -263,10 +264,11 @@ namespace ClaudeUsageTracker
             contextMenu.Items.Add(_hudMenuItem);
             contextMenu.Items.Add("📈 Thống kê", null, (s, e) => OpenStats());
             contextMenu.Items.Add("🔄 Làm mới Usage", null, async (s, e) => await RefreshUsageAsync(showFeedback: true));
+            _menuFont = new Font(System.Drawing.SystemFonts.MenuFont ?? System.Drawing.SystemFonts.DefaultFont, System.Drawing.FontStyle.Bold);
             _updateMenuItem = new ToolStripMenuItem("⬆ Cập nhật", null, async (s, e) => await PromptAndApplyUpdateAsync())
             {
                 Visible = false,
-                Font = new Font(System.Drawing.SystemFonts.MenuFont ?? System.Drawing.SystemFonts.DefaultFont, System.Drawing.FontStyle.Bold)
+                Font = _menuFont
             };
             contextMenu.Items.Add(_updateMenuItem);
             contextMenu.Items.Add("🔍 Kiểm tra bản mới", null, async (s, e) => await CheckForUpdateAsync(manual: true));
@@ -801,6 +803,7 @@ namespace ClaudeUsageTracker
             _watcherService?.Dispose();
             _fileWatcherService?.Dispose();
             _foregroundWatcher?.Dispose();
+            Views.ToastWindow.ShutdownAll();
             _statsWindow?.Close();
             _countdownWindow?.Close();
             if (_hud != null)
@@ -814,8 +817,12 @@ namespace ClaudeUsageTracker
             {
                 _notifyIcon.Visible = false;
                 // NotifyIcon.Dispose() không đụng tới ContextMenuStrip và Icon của nó.
+                // Font phải dispose TRƯỚC: sau khi strip bị dispose, item mất Owner nên
+                // ToolStripItem.Font trả về font dùng chung của hệ thống — dispose nhầm cái đó
+                // là phá luôn giao diện của tiến trình.
+                _menuFont?.Dispose();
+                _menuFont = null;
                 _notifyIcon.ContextMenuStrip?.Dispose();
-                _updateMenuItem?.Font?.Dispose();
                 _notifyIcon.Icon?.Dispose();
                 _notifyIcon.Dispose();
             }

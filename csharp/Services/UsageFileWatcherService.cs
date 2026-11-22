@@ -35,12 +35,17 @@ namespace ClaudeUsageTracker.Services
                 catch { return; }
             }
 
+            // FileName bắt buộc: cả ApiSync lẫn statusline.js đều ghi qua file tạm rồi đổi tên
+            // (để không ai đọc phải nội dung cụt). Thao tác đó sinh sự kiện Renamed, mà Renamed
+            // chỉ nổ khi có NotifyFilters.FileName — thiếu nó là watcher im hoàn toàn,
+            // tool chỉ còn cập nhật theo nhịp 30 giây.
             var watcher = new FileSystemWatcher(dir, file)
             {
-                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.FileName
             };
             watcher.Changed += (s, e) => ScheduleNotify();
             watcher.Created += (s, e) => ScheduleNotify();
+            watcher.Renamed += (s, e) => ScheduleNotify();
             _watchers.Add(watcher);
         }
 
