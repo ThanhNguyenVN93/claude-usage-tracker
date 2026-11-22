@@ -18,6 +18,29 @@ namespace ClaudeUsageTracker.Views
         // Khi true, cho phép cửa sổ đóng thật (dùng lúc thoát hẳn ứng dụng).
         public bool AllowRealClose { get; set; }
 
+        // Người dùng bấm ✕ / thu nhỏ thì HUD phải ở yên. Trước đây chỉ Hide(), nên lần sau
+        // quay lại VS Code hay terminal là ForegroundAppWatcher tự Show() lại — nút ✕ thành vô dụng.
+        public bool HiddenByUser { get; private set; }
+
+        public void ShowFromWatcher()
+        {
+            if (HiddenByUser) return;
+            Show();
+        }
+
+        // Bật lại qua tray/hotkey là ý định rõ ràng của người dùng → gỡ cờ ẩn.
+        public void ShowByUser()
+        {
+            HiddenByUser = false;
+            Show();
+        }
+
+        public void HideByUser()
+        {
+            HiddenByUser = true;
+            Hide();
+        }
+
         public MiniHudWindow(UsageInfo info, Func<Task<UsageInfo>> fetch, Action openStats, Action openSettings)
         {
             InitializeComponent();
@@ -43,7 +66,7 @@ namespace ClaudeUsageTracker.Views
             {
                 if (AllowRealClose) return;
                 e.Cancel = true;
-                Hide();
+                HideByUser();   // Alt+F4 cũng là ý định ẩn, không phải ẩn tạm
             };
         }
 
@@ -130,15 +153,9 @@ namespace ClaudeUsageTracker.Views
             }
         }
 
-        private void BtnClose_Click(object sender, RoutedEventArgs e)
-        {
-            Hide();
-        }
+        private void BtnClose_Click(object sender, RoutedEventArgs e) => HideByUser();
 
-        private void BtnMinimize_Click(object sender, RoutedEventArgs e)
-        {
-            Hide();
-        }
+        private void BtnMinimize_Click(object sender, RoutedEventArgs e) => HideByUser();
 
         private async void BtnRefresh_Click(object sender, RoutedEventArgs e)
         {

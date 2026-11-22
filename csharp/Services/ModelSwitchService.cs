@@ -79,6 +79,7 @@ namespace ClaudeUsageTracker.Services
 
             _state = new ModelSwitchState();
             SaveState();
+            _settings.DiscardBackup();   // đã trả về như cũ: không giữ .tracker.bak nữa
             return new Alert(
                 "Đã khôi phục model mặc định",
                 $"{reason}. Model mặc định cho phiên mới: {original ?? "(mặc định của Claude Code)"}.",

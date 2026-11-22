@@ -18,10 +18,35 @@ namespace ClaudeUsageTracker.Services
 
         private readonly string _path;
 
+        // ReadModel() được gọi mỗi lần đánh giá quota (30 giây/lần khi bật auto-model).
+        // Cache theo mtime+size để không đọc đĩa của app khác liên tục.
+        private (DateTime stamp, long length, string? model) _cache;
+        private bool _cacheValid;
+
         public ClaudeSettingsFile(string path) => _path = path;
 
         // null = chưa đặt model (hoặc không đọc được file).
         public string? ReadModel()
+        {
+            try
+            {
+                var info = new FileInfo(_path);
+                if (info.Exists && _cacheValid
+                    && _cache.stamp == info.LastWriteTimeUtc && _cache.length == info.Length)
+                    return _cache.model;
+
+                string? model = ReadModelUncached();
+                if (info.Exists)
+                {
+                    _cache = (info.LastWriteTimeUtc, info.Length, model);
+                    _cacheValid = true;
+                }
+                return model;
+            }
+            catch { return ReadModelUncached(); }
+        }
+
+        private string? ReadModelUncached()
         {
             var root = TryLoad();
             return root != null && root.TryGetPropertyValue("model", out var node) && node is JsonValue v
@@ -45,6 +70,7 @@ namespace ClaudeUsageTracker.Services
                 string temp = _path + ".tracker.tmp";
                 File.WriteAllText(temp, root.ToJsonString(WriteOptions));
                 File.Move(temp, _path, overwrite: true);
+                _cacheValid = false;   // ta vừa ghi: cache cũ không còn đúng
                 return true;
             }
             catch
@@ -67,11 +93,19 @@ namespace ClaudeUsageTracker.Services
             }
         }
 
+        private string BackupPath => _path + ".tracker.bak";
+
         private void BackupOnce()
         {
             if (!File.Exists(_path)) return; // không backup nếu chưa có file
-            string backup = _path + ".tracker.bak";
-            if (!File.Exists(backup)) File.Copy(_path, backup);
+            if (!File.Exists(BackupPath)) File.Copy(_path, BackupPath);
+        }
+
+        // Tool đã trả model về như cũ thì bản sao lưu không còn lý do tồn tại —
+        // trước đây .tracker.bak nằm lại trong ~/.claude vĩnh viễn.
+        public void DiscardBackup()
+        {
+            try { File.Delete(BackupPath); } catch { /* còn bị khoá: để lần sau */ }
         }
     }
 }

@@ -121,8 +121,10 @@ namespace ClaudeUsageTracker.Services
             return string.Equals(actual, expectedHex, StringComparison.OrdinalIgnoreCase);
         }
 
-        // Extract toàn bộ nội dung zip vào destDir (với bảo vệ path traversal).
-        // Trả về đường dẫn tới ClaudeUsageTracker.exe trong destDir.
+        // Extract toàn bộ nội dung zip vào destDir, GIỮ NGUYÊN cây thư mục (với bảo vệ path traversal).
+        // Trả về đường dẫn tới ClaudeUsageTracker.exe ở gốc destDir.
+        // Trước đây chỉ lấy file tầng gốc và bỏ im lặng mọi thư mục con → bản cài qua nút "Cập nhật"
+        // thiếu file so với bản tải thủ công, mà không báo lỗi gì.
         public static string ExtractExe(string zipPath, string destDir)
         {
             Directory.CreateDirectory(destDir);
@@ -134,15 +136,13 @@ namespace ClaudeUsageTracker.Services
             long totalExtracted = 0;
             foreach (var entry in zip.Entries)
             {
-                // Bỏ qua thư mục
+                // Bỏ qua mục thư mục (tên rỗng)
                 if (string.IsNullOrEmpty(entry.Name)) continue;
 
-                // Chỉ lấy file ở gốc zip (không có sub-folder)
-                string name = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
-                if (name.Contains(Path.DirectorySeparatorChar)) continue;
+                string relative = entry.FullName.Replace('/', Path.DirectorySeparatorChar);
 
-                // Bảo vệ path traversal
-                string dest = Path.GetFullPath(Path.Combine(destFull, entry.Name));
+                // Bảo vệ path traversal: so khớp sau khi đã chuẩn hoá đường dẫn tuyệt đối.
+                string dest = Path.GetFullPath(Path.Combine(destFull, relative));
                 if (!dest.StartsWith(destFull + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
                     throw new InvalidDataException($"Path traversal bị chặn: {entry.FullName}");
 
@@ -153,11 +153,15 @@ namespace ClaudeUsageTracker.Services
                 if (totalExtracted > MaxZipBytes)
                     throw new InvalidDataException("Tổng dung lượng giải nén vượt giới hạn");
 
-                using var input = entry.Open();
-                using var output = File.Create(dest);
-                input.CopyTo(output);
+                Directory.CreateDirectory(Path.GetDirectoryName(dest)!);
+                using (var input = entry.Open())
+                using (var output = File.Create(dest))
+                    input.CopyTo(output);
 
-                if (entry.Name.Equals(ExeName, StringComparison.OrdinalIgnoreCase)) exeFound = true;
+                // exe phải nằm ở gốc: bản cài chạy ClaudeUsageTracker.exe ngay trong thư mục đó.
+                if (!relative.Contains(Path.DirectorySeparatorChar)
+                    && entry.Name.Equals(ExeName, StringComparison.OrdinalIgnoreCase))
+                    exeFound = true;
             }
 
             if (!exeFound) throw new InvalidDataException("Zip không chứa ClaudeUsageTracker.exe ở gốc");

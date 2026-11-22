@@ -198,7 +198,7 @@ namespace ClaudeUsageTracker
             string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
             ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
 
-            if (!string.IsNullOrWhiteSpace(_config.WebhookUrl))
+            if (IsValidWebhook(_config.WebhookUrl))
                 _ = PostWebhookAsync(_config.WebhookUrl, title, message);
         }
 
@@ -207,7 +207,7 @@ namespace ClaudeUsageTracker
         {
             if (_hud == null || _lastUsage == null) return;
             _hud.ApplyData(_lastUsage);
-            _hud.Show();
+            _hud.ShowByUser();
             _hud.Activate();
         }
 
@@ -234,7 +234,7 @@ namespace ClaudeUsageTracker
                     _lastUsage = await FetchUsageAsync();
                     _hud.ApplyData(_lastUsage);
                     UpdateTrayTooltip(_lastUsage);
-                    _hud.Show();
+                    _hud.ShowFromWatcher();   // tôn trọng việc người dùng đã bấm ✕
                 }
                 else
                 {
@@ -399,13 +399,13 @@ namespace ClaudeUsageTracker
                 if (_hud == null) return;
                 if (_hud.IsVisible)
                 {
-                    _hud.Hide();
+                    _hud.HideByUser();
                     return;
                 }
 
                 _lastUsage ??= await FetchUsageAsync();
                 _hud.ApplyData(_lastUsage);
-                _hud.Show();
+                _hud.ShowByUser();
                 _hud.Activate();
             }, nameof(ToggleHud));
         }
@@ -428,7 +428,19 @@ namespace ClaudeUsageTracker
             }, nameof(OpenStats));
         }
 
+        // Bốn nguồn cùng gọi refresh (tick 30s, file watcher, đổi foreground, bấm tay).
+        // Không chặn thì lượt chậm hơn về sau ghi đè _lastUsage bằng số cũ hơn.
+        private bool _refreshing;
+
         private async Task RefreshUsageAsync(bool showFeedback = false)
+        {
+            if (_refreshing) return;
+            _refreshing = true;
+            try { await RefreshUsageCoreAsync(showFeedback); }
+            finally { _refreshing = false; }
+        }
+
+        private async Task RefreshUsageCoreAsync(bool showFeedback)
         {
             var previousSnapshot = _lastUsage?.LastRefreshedAt;
 
@@ -467,7 +479,9 @@ namespace ClaudeUsageTracker
             if (_notifyIcon != null)
             {
                 string tip = $"Claude: {info.PercentUsed:0}% | {info.MessagesRemaining}";
-                if (tip.Length > 63) tip = tip.Substring(0, 60) + "...";
+                // NotifyIcon.Text giới hạn 63 ký tự. Cắt theo text element chứ không theo char:
+                // Substring giữa một surrogate pair (emoji) sinh ký tự rác.
+                if (tip.Length > 63) tip = Truncate(tip, 60) + "...";
                 _notifyIcon.Text = tip;
 
                 // Đẩy màu icon lên một mức khi có cảnh báo đang tồn tại (dự báo cạn quota, ngữ cảnh phình to).
@@ -485,6 +499,22 @@ namespace ClaudeUsageTracker
                     oldIcon?.Dispose();
                 }
             }
+        }
+
+        // Cắt ở ranh giới text element để không xé đôi surrogate pair hay cụm dấu kết hợp.
+        private static string Truncate(string text, int maxChars)
+        {
+            if (text.Length <= maxChars) return text;
+
+            var e = System.Globalization.StringInfo.GetTextElementEnumerator(text);
+            int lastSafe = 0;
+            while (e.MoveNext())
+            {
+                int end = e.ElementIndex + ((string)e.Current).Length;
+                if (end > maxChars) break;
+                lastSafe = end;
+            }
+            return text[..lastSafe];
         }
 
         private static Version CurrentVersion() =>
@@ -608,9 +638,7 @@ namespace ClaudeUsageTracker
             try
             {
                 if (Directory.Exists(installDir)) Directory.Delete(installDir, true);
-                Directory.CreateDirectory(installDir);
-                foreach (var file in Directory.EnumerateFiles(stagedDir))
-                    File.Copy(file, Path.Combine(installDir, Path.GetFileName(file)), overwrite: true);
+                CopyDirectory(stagedDir, installDir);
             }
             catch (Exception ex)
             {
@@ -621,10 +649,46 @@ namespace ClaudeUsageTracker
 
             try { Directory.Delete(Path.GetDirectoryName(stagedDir)!, true); } catch { /* dọn tạm */ }
 
+            PruneOldInstalls(installDir);
+
             string newExe = Path.Combine(installDir, UpdateLogic.ExeName);
             Process.Start(new ProcessStartInfo(newExe) { UseShellExecute = true });
             ExitApplication();
         }
+
+        // EnumerateFiles chỉ thấy tầng gốc; zip phát hành có thể kèm thư mục con
+        // (satellite assembly, dữ liệu phụ) và bỏ sót chúng tạo ra bản cài thiếu file.
+        private static void CopyDirectory(string sourceDir, string targetDir)
+        {
+            Directory.CreateDirectory(targetDir);
+            foreach (var file in Directory.EnumerateFiles(sourceDir))
+                File.Copy(file, Path.Combine(targetDir, Path.GetFileName(file)), overwrite: true);
+            foreach (var dir in Directory.EnumerateDirectories(sourceDir))
+                CopyDirectory(dir, Path.Combine(targetDir, Path.GetFileName(dir)));
+        }
+
+        // Mỗi bản cài self-contained chiếm hàng trăm MB; không dọn thì LOCALAPPDATA phình mãi.
+        // Giữ lại bản vừa cài (bản đang chạy nằm ở chỗ khác và không bị đụng tới).
+        private static void PruneOldInstalls(string keepDir)
+        {
+            try
+            {
+                string root = Path.GetDirectoryName(keepDir)!;
+                string? running = Environment.ProcessPath is string p ? Path.GetDirectoryName(p) : null;
+
+                foreach (var dir in Directory.EnumerateDirectories(root))
+                {
+                    if (PathEquals(dir, keepDir) || (running != null && PathEquals(dir, running))) continue;
+                    try { Directory.Delete(dir, true); } catch { /* đang bị khoá: lần sau dọn */ }
+                }
+            }
+            catch { /* dọn dẹp thất bại không được chặn việc cập nhật */ }
+        }
+
+        private static bool PathEquals(string a, string b) =>
+            string.Equals(Path.GetFullPath(a).TrimEnd(Path.DirectorySeparatorChar),
+                          Path.GetFullPath(b).TrimEnd(Path.DirectorySeparatorChar),
+                          StringComparison.OrdinalIgnoreCase);
 
         private SettingsWindow? _settingsWindow;
         private void OpenSettings()
@@ -697,6 +761,12 @@ namespace ClaudeUsageTracker
             }
         }
 
+        // Số liệu usage là dữ liệu riêng tư — chỉ gửi qua https, không gửi plaintext qua http.
+        private static bool IsValidWebhook(string? url) =>
+            !string.IsNullOrWhiteSpace(url)
+            && Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            && uri.Scheme == Uri.UriSchemeHttps;
+
         private async Task PostWebhookAsync(string url, string title, string message)
         {
             try
@@ -743,6 +813,10 @@ namespace ClaudeUsageTracker
             if (_notifyIcon != null)
             {
                 _notifyIcon.Visible = false;
+                // NotifyIcon.Dispose() không đụng tới ContextMenuStrip và Icon của nó.
+                _notifyIcon.ContextMenuStrip?.Dispose();
+                _updateMenuItem?.Font?.Dispose();
+                _notifyIcon.Icon?.Dispose();
                 _notifyIcon.Dispose();
             }
             Shutdown();
