@@ -16,7 +16,7 @@ Tổng hợp các tính năng hữu ích tiềm năng (chưa triển khai), phâ
 3. **Tự động gửi `continue` cho CLI khi vừa Reset (`Auto-Continue CLI`)**
    - Tương tự checkbox `Auto-continue when limits reset` của Claude Desktop: khi quota từ 100% vừa reset về `< 5%`, tool tự focus terminal đang chờ và gửi `continue` + Enter để làm tiếp công việc dang dở.
 
-4. **Nút hành động trực tiếp trên Popup Toast (`Interactive Toast`)**
+4. ✅ **[Đã xong] Nút hành động trực tiếp trên Popup Toast (`Interactive Toast`)**
    - Gắn thẳng nút `[🧹 Compact]` hoặc `[⚡ Đổi Haiku]` ngay trên góc thông báo Toast cảnh báo 95% hoặc context >70% $\rightarrow$ bấm xử lý ngay trong 1 giây, không cần mở HUD.
 
 5. **Giao diện Bật/Tắt nhanh từng MCP Server (`MCP Switcher UI`)**
@@ -26,7 +26,7 @@ Tổng hợp các tính năng hữu ích tiềm năng (chưa triển khai), phâ
 
 ## 🛠️ Nhóm B: Tiện ích quy trình làm việc & Riêng tư
 
-6. **Tự động bật Chế độ riêng tư khi họp (`Auto-Privacy`)**
+6. ✅ **[Đã xong] Tự động bật Chế độ riêng tư khi họp (`Auto-Privacy`)**
    - Tự nhận diện `Zoom`, `ms-teams`, `obs64`, hoặc tab `Google Meet` đang mở $\rightarrow$ tự động ẩn HUD và tắt Toast để tránh lộ tên dự án/chi phí khi share màn hình; tắt họp xong tự khôi phục lại.
 
 7. **Mở lại nhanh 5 phiên Claude Code gần nhất (`--resume` Launcher)**
@@ -45,7 +45,7 @@ Tổng hợp các tính năng hữu ích tiềm năng (chưa triển khai), phâ
 
 ## ⚙️ Nhóm C: Tuỳ biến nâng cao
 
-11. **Tuỳ chỉnh phím tắt cho Lệnh nhanh trong Cài đặt**
+11. ✅ **[Đã xong] Tuỳ chỉnh phím tắt cho Lệnh nhanh trong Cài đặt**
     - Cho phép đổi tổ hợp `Ctrl+Shift+H` / `Ctrl+Shift+C` trực tiếp trong `SettingsWindow` giống phím tắt HUD/Stats.
 
 12. **Lệnh CLI xem nhanh từ Terminal (`cut status`)**

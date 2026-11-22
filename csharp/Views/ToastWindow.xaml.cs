@@ -13,7 +13,7 @@ namespace ClaudeUsageTracker.Views
 
         // Nhiều cảnh báo nổ liên tiếp (vượt mốc 5h + vượt mốc tuần + ngữ cảnh phình) thì
         // trước đây cái sau đè cái trước ngay lập tức, người dùng không kịp đọc. Xếp hàng thay vì đè.
-        private static readonly Queue<(string title, string body, string icon, Action? onAction)> Pending = new();
+        private static readonly Queue<(string title, string body, string icon, Action? onAction, IReadOnlyList<(string label, Action action)>? quickActions)> Pending = new();
         private const int MaxPending = 5;
         private static bool _shuttingDown;
 
@@ -34,13 +34,36 @@ namespace ClaudeUsageTracker.Views
 
         public event Action? ActionClicked;
 
-        private ToastWindow(string icon, string title, string body)
+        private ToastWindow(string icon, string title, string body, IReadOnlyList<(string label, Action action)>? quickActions)
         {
             InitializeComponent();
             TxtIcon.Text  = icon;
             TxtTitle.Text = title;
             TxtBody.Text  = body;
             _remaining    = Duration;
+
+            if (quickActions is { Count: > 0 })
+            {
+                foreach (var (label, action) in quickActions)
+                {
+                    var btn = new System.Windows.Controls.Button
+                    {
+                        Content = label,
+                        Margin = new Thickness(0, 0, 6, 0),
+                        Padding = new Thickness(8, 3, 8, 3),
+                        FontSize = 10,
+                        Cursor = System.Windows.Input.Cursors.Hand,
+                        Background = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#313244")!,
+                        Foreground = (System.Windows.Media.Brush)new System.Windows.Media.BrushConverter().ConvertFromString("#A6ADC8")!,
+                        BorderThickness = new Thickness(0)
+                    };
+                    // Click đã tự đánh dấu Handled trên MouseLeftButtonDown gốc — không kích hoạt
+                    // thêm action "mở HUD" gắn ở MouseLeftButtonDown của cả cửa sổ.
+                    btn.Click += (s, e) => { Dismiss(); action(); };
+                    PanelQuickActions.Children.Add(btn);
+                }
+                PanelQuickActions.Visibility = Visibility.Visible;
+            }
 
             _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
             _timer.Tick += OnTick;
@@ -65,22 +88,24 @@ namespace ClaudeUsageTracker.Views
             };
         }
 
-        public static void ShowToast(string title, string body, string icon = "🔔", Action? onAction = null)
+        public static void ShowToast(string title, string body, string icon = "🔔", Action? onAction = null,
+            IReadOnlyList<(string label, Action action)>? quickActions = null)
         {
             if (_shuttingDown) return;
             if (_current != null)
             {
                 // Hàng đợi có trần: cảnh báo cũ nhất bị bỏ chứ không dồn vô hạn.
                 if (Pending.Count >= MaxPending) Pending.Dequeue();
-                Pending.Enqueue((title, body, icon, onAction));
+                Pending.Enqueue((title, body, icon, onAction, quickActions));
                 return;
             }
-            Display(title, body, icon, onAction);
+            Display(title, body, icon, onAction, quickActions);
         }
 
-        private static void Display(string title, string body, string icon, Action? onAction)
+        private static void Display(string title, string body, string icon, Action? onAction,
+            IReadOnlyList<(string label, Action action)>? quickActions)
         {
-            var t = new ToastWindow(icon, title, body);
+            var t = new ToastWindow(icon, title, body, quickActions);
             if (onAction != null) t.ActionClicked += onAction;
             _current = t;
             t.Show();
@@ -90,7 +115,7 @@ namespace ClaudeUsageTracker.Views
         {
             if (_shuttingDown || _current != null || Pending.Count == 0) return;
             var next = Pending.Dequeue();
-            Display(next.title, next.body, next.icon, next.onAction);
+            Display(next.title, next.body, next.icon, next.onAction, next.quickActions);
         }
 
         private void OnTick(object? sender, EventArgs e)

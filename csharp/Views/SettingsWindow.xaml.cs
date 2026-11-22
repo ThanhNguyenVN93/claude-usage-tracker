@@ -61,6 +61,7 @@ namespace ClaudeUsageTracker.Views
             ChkResetReminder.IsChecked = _config.EnableResetReminder;
             ChkSoundAlert.IsChecked = _config.EnableSoundAlert;
             ChkUpdateCheck.IsChecked = _config.EnableUpdateCheck;
+            ChkAutoPrivacy.IsChecked = _config.AutoPrivacyEnabled;
             TxtHudOpacity.Text = Num(Math.Round(_config.HudOpacity * 100), "0");
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
@@ -144,6 +145,7 @@ namespace ClaudeUsageTracker.Views
             _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
             _config.EnableSoundAlert = ChkSoundAlert.IsChecked == true;
             _config.EnableUpdateCheck = ChkUpdateCheck.IsChecked == true;
+            _config.AutoPrivacyEnabled = ChkAutoPrivacy.IsChecked == true;
             if (TryParseInt(TxtHudOpacity.Text, out int opacityPct) && opacityPct is >= 50 and <= 100)
                 _config.HudOpacity = opacityPct / 100.0;
             else rejected.Add("Độ rõ cửa sổ HUD (50–100%)");

@@ -40,6 +40,8 @@ namespace ClaudeUsageTracker
         private ReleaseInfo? _availableUpdate;
         private ToolStripMenuItem? _updateMenuItem;
         private Font? _menuFont;
+        private ToolStripMenuItem? _privacyMenuItem;
+        private bool _privacyAutoEnabled;
         private string? _lastIconHex;
         private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
@@ -173,6 +175,7 @@ namespace ClaudeUsageTracker
                 {
                     _snoozeMenuItem.Text = "🔕 Tắt thông báo 1 giờ";
                 }
+                CheckAutoPrivacy();
                 await RefreshUsageAsync();
             };
             _tick.Start();
@@ -217,7 +220,24 @@ namespace ClaudeUsageTracker
             if (!_config.PrivacyMode)
             {
                 string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
-                ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
+                // Cảnh báo quota cao (Warn/Critical) kèm nút xử lý ngay — đỡ phải mở HUD rồi mới đổi model.
+                IReadOnlyList<(string label, Action action)>? quickActions =
+                    level is AlertLevel.Critical or AlertLevel.Warn
+                        ? new (string, Action)[]
+                          {
+                              ("⚡ Haiku", () => RunOnUi(async () =>
+                              {
+                                  var (ok, msg) = await SendTerminalCommandAsync("/model haiku");
+                                  ToastWindow.ShowToast(ok ? "⚡ Đã gửi /model haiku" : "⚠ Không gửi được lệnh", msg, ok ? "⚡" : "⚠️");
+                              }, "ToastQuickHaiku")),
+                              ("🧹 Compact", () => RunOnUi(async () =>
+                              {
+                                  var (ok, msg) = await SendTerminalCommandAsync("/compact");
+                                  ToastWindow.ShowToast(ok ? "🧹 Đã gửi /compact" : "⚠ Không gửi được lệnh", msg, ok ? "🧹" : "⚠️");
+                              }, "ToastQuickCompact")),
+                          }
+                        : null;
+                ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast, quickActions: quickActions);
             }
 
             if (IsValidWebhook(_config.WebhookUrl))
@@ -356,18 +376,21 @@ namespace ClaudeUsageTracker
                 CopyPromptSnippet("Chỉ liệt kê tên file và số dòng bị lỗi, chưa cần sửa."));
             contextMenu.Items.Add(promptsMenu);
 
-            var privacyItem = new ToolStripMenuItem("👁 Chế độ riêng tư (Ẩn khi share màn hình)")
+            _privacyMenuItem = new ToolStripMenuItem("👁 Chế độ riêng tư (Ẩn khi share màn hình)")
             {
                 Checked = _config.PrivacyMode,
                 CheckOnClick = true
             };
-            privacyItem.Click += (s, e) =>
+            _privacyMenuItem.Click += (s, e) =>
             {
-                _config.PrivacyMode = privacyItem.Checked;
+                _config.PrivacyMode = _privacyMenuItem.Checked;
+                // Người dùng tự tắt tay thì đừng để tick sau của Auto-Privacy bật lại ngay —
+                // tôn trọng lựa chọn thủ công cho tới khi app phát hiện lại 1 phiên họp MỚI.
+                if (!_config.PrivacyMode) _privacyAutoEnabled = false;
                 ConfigService.Save(_config);
                 if (_config.PrivacyMode) _hud?.Hide();
             };
-            contextMenu.Items.Add(privacyItem);
+            contextMenu.Items.Add(_privacyMenuItem);
 
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
@@ -1154,6 +1177,47 @@ Start-Sleep -Seconds 2
         private bool _isExiting;
         private Task<(bool Ok, string Message)> SendTerminalCommandAsync(string command) =>
             TerminalCommandService.SendCommandAsync(_foregroundWatcher?.LastTargetHwnd ?? IntPtr.Zero, command);
+
+        private static readonly string[] MeetingProcessNames = { "Zoom", "Teams", "ms-teams", "obs64" };
+
+        private static bool IsMeetingAppRunning()
+        {
+            foreach (var name in MeetingProcessNames)
+            {
+                Process[] procs;
+                try { procs = Process.GetProcessesByName(name); }
+                catch { continue; }
+                try { if (procs.Length > 0) return true; }
+                finally { foreach (var p in procs) p.Dispose(); }
+            }
+            return false;
+        }
+
+        // Tự bật/tắt Privacy Mode theo sự có mặt của Zoom/Teams/OBS. Chỉ tự TẮT lại khi chính
+        // tính năng này là bên đã bật (cờ _privacyAutoEnabled) — không đụng vào lựa chọn thủ công
+        // của người dùng nếu họ tự bật Privacy Mode khi không họp.
+        private void CheckAutoPrivacy()
+        {
+            if (!_config.AutoPrivacyEnabled) return;
+            bool meeting = IsMeetingAppRunning();
+
+            if (meeting && !_config.PrivacyMode)
+            {
+                _config.PrivacyMode = true;
+                _privacyAutoEnabled = true;
+                if (_privacyMenuItem != null) _privacyMenuItem.Checked = true;
+                ConfigService.Save(_config);
+                _hud?.Hide();
+            }
+            else if (!meeting && _privacyAutoEnabled && _config.PrivacyMode)
+            {
+                _config.PrivacyMode = false;
+                _privacyAutoEnabled = false;
+                if (_privacyMenuItem != null) _privacyMenuItem.Checked = false;
+                ConfigService.Save(_config);
+                ToastWindow.ShowToast("👁 Đã tắt Chế độ riêng tư", "Không còn thấy Zoom/Teams/OBS đang chạy.", "👁");
+            }
+        }
 
         // Cả 4 hotkey đều do người dùng tự đặt trong Settings nên có thể trùng nhau bất kỳ lúc nào.
         // Windows chỉ cho MỘT nơi giữ mỗi tổ hợp — đăng ký lần lượt, bên trùng với bên đã giữ trước
