@@ -9,5 +9,6 @@ namespace ClaudeUsageTracker.Models
         double SevenDay,
         string? Model = null,
         double? ContextPct = null,
-        string? SessionId = null);
+        string? SessionId = null,
+        string? Project = null);
 }

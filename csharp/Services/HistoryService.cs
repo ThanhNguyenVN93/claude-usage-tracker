@@ -133,8 +133,9 @@ namespace ClaudeUsageTracker.Services
                     string? model = r.TryGetProperty("model", out var mEl) && mEl.ValueKind == JsonValueKind.String ? mEl.GetString() : null;
                     double? ctx = r.TryGetProperty("ctx", out var cEl) && cEl.ValueKind == JsonValueKind.Number ? cEl.GetDouble() : null;
                     string? sid = r.TryGetProperty("sid", out var sEl) && sEl.ValueKind == JsonValueKind.String ? sEl.GetString() : null;
+                    string? project = r.TryGetProperty("project", out var pEl) && pEl.ValueKind == JsonValueKind.String ? pEl.GetString() : null;
 
-                    result.Add(new UsageSample(FromMs(tEl.GetInt64()), fhEl.GetDouble(), sd, model, ctx, sid));
+                    result.Add(new UsageSample(FromMs(tEl.GetInt64()), fhEl.GetDouble(), sd, model, ctx, sid, project));
                 }
                 catch
                 {

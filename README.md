@@ -56,7 +56,7 @@ cd csharp
 dotnet publish ClaudeUsageTracker.csproj -c Release -r win-x64 --self-contained true -o <thu-muc-dich>
 ```
 
-Chạy thẳng `run-csharp.bat` ở gốc repo cũng được — nó tự build nếu chưa có bản nào.
+Chạy thẳng `run-csharp.bat` ở gốc repo cũng được — nó tự build nếu chưa có bản nào. Muốn cập nhật code mới từ Git, bấm "Kiểm tra bản mới" từ tray menu — app sẽ tự sinh `update.bat` (git pull + build lại + khởi động lại) và chạy nó; không cần tự tạo file này.
 
 Nên publish vào một thư mục cố định ngoài repo (ví dụ `D:\ClaudeUsageTracker`) rồi chạy từ đó, để việc build lại không làm hỏng bản đang tự khởi động cùng Windows. Bật "Khởi động cùng Windows" trong Cài đặt (ghi registry `HKCU\...\Run`, không cần admin); app tự sửa đường dẫn trong registry mỗi lần chạy nếu bạn chuyển thư mục, nhưng không tự bật lại khi bạn đã tắt.
 

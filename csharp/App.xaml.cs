@@ -44,6 +44,8 @@ namespace ClaudeUsageTracker
         private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
         private GlobalHotkeyService? _hotkeyStats;
+        private GlobalHotkeyService? _hotkeyQuickHaiku;
+        private GlobalHotkeyService? _hotkeyQuickCompact;
         private ToolStripMenuItem? _hudMenuItem;
         private ToolStripMenuItem? _snoozeMenuItem;
         private ToolStripMenuItem? _syncPauseMenuItem;
@@ -130,7 +132,7 @@ namespace ClaudeUsageTracker
 
             _lastUsage = await FetchUsageAsync();
             if (_isExiting) return;
-            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, OpenSettings, _config);
+            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, OpenSettings, _config, SendTerminalCommandAsync);
             // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
             UpdateTrayTooltip(_lastUsage);
 
@@ -141,6 +143,20 @@ namespace ClaudeUsageTracker
             _hotkeyStats = new GlobalHotkeyService(OpenStats, 0x9002);
             try { _hotkeyStats.Register(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey); }
             catch { }
+
+            _hotkeyQuickHaiku = new GlobalHotkeyService(() => RunOnUi(async () =>
+            {
+                var (ok, msg) = await SendTerminalCommandAsync("/model haiku");
+                ToastWindow.ShowToast(ok ? "⚡ Đã gửi /model haiku" : "⚠ Không gửi được lệnh", msg, ok ? "⚡" : "⚠️");
+            }, "HotkeyQuickHaiku"), 0x9003);
+
+            _hotkeyQuickCompact = new GlobalHotkeyService(() => RunOnUi(async () =>
+            {
+                var (ok, msg) = await SendTerminalCommandAsync("/compact");
+                ToastWindow.ShowToast(ok ? "🧹 Đã gửi /compact" : "⚠ Không gửi được lệnh", msg, ok ? "🧹" : "⚠️");
+            }, "HotkeyQuickCompact"), 0x9004);
+
+            RegisterQuickHotkeys();
 
             _watcherService.OnClaudeLaunched += OnClaudeLaunched;
             _watcherService.Start();
@@ -196,8 +212,18 @@ namespace ClaudeUsageTracker
             string title = alerts.Count == 1 ? alerts[0].Title : $"{alerts.Count} cảnh báo usage";
             string message = string.Join("\n", alerts.Select(a => alerts.Count == 1 ? a.Message : $"• {a.Title}"));
 
-            string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
-            ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
+            // Privacy Mode = đang họp/chia sẻ màn hình: tiếng "ting" cũng lộ chuyện như toast,
+            // nên phải tắt luôn chứ không chỉ ẩn HUD/toast.
+            if (_config.EnableSoundAlert && !_config.PrivacyMode && level == AlertLevel.Critical)
+            {
+                try { System.Media.SystemSounds.Exclamation.Play(); } catch { }
+            }
+
+            if (!_config.PrivacyMode)
+            {
+                string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
+                ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
+            }
 
             if (IsValidWebhook(_config.WebhookUrl))
                 _ = PostWebhookAsync(_config.WebhookUrl, title, message);
@@ -230,7 +256,8 @@ namespace ClaudeUsageTracker
             RunOnUi(async () =>
             {
                 if (_hud == null) return;
-                if (allowed)
+                if (_isMenuOpen || _notifyIcon?.ContextMenuStrip?.Visible == true) return;
+                if (allowed && !_config.PrivacyMode)
                 {
                     _lastUsage = await FetchUsageAsync();
                     _hud.ApplyData(_lastUsage);
@@ -249,6 +276,8 @@ namespace ClaudeUsageTracker
             RunOnUi(() => RefreshUsageAsync(), nameof(OnUsageFileChanged));
         }
 
+        private bool _isMenuOpen;
+
         private void SetupNotifyIcon()
         {
             string verStr = UpdateLogic.Normalize(CurrentVersion()).ToString(3);
@@ -260,6 +289,33 @@ namespace ClaudeUsageTracker
             };
 
             var contextMenu = new ContextMenuStrip();
+            _notifyIcon.MouseDown += (s, e) =>
+            {
+                if (e.Button == MouseButtons.Right)
+                {
+                    _isMenuOpen = true;
+                    // Safety net: nếu vì lý do nào đó menu không mở ra (VD: bị hệ thống nuốt sự kiện),
+                    // tự gỡ _isMenuOpen sau 600ms để không khoá cứng HUD & tooltip vĩnh viễn.
+                    _ = Task.Delay(600).ContinueWith(_ =>
+                    {
+                        RunOnUi(() =>
+                        {
+                            if (_isMenuOpen && !contextMenu.Visible)
+                                _isMenuOpen = false;
+                            return Task.CompletedTask;
+                        }, "ResetMenuFlag");
+                    });
+                }
+            };
+
+            contextMenu.Opening += (s, e) => _isMenuOpen = true;
+            contextMenu.Opened += (s, e) => _isMenuOpen = true;
+            contextMenu.Closed += (s, e) =>
+            {
+                _isMenuOpen = false;
+                if (_lastUsage != null) UpdateTrayTooltip(_lastUsage);
+            };
+
             var versionItem = new ToolStripMenuItem($"Claude Usage Tracker  v{verStr}") { Enabled = false };
             contextMenu.Items.Add(versionItem);
             contextMenu.Items.Add(new ToolStripSeparator());
@@ -269,7 +325,10 @@ namespace ClaudeUsageTracker
             contextMenu.Items.Add("📈 Thống kê", null, (s, e) => OpenStats());
             contextMenu.Items.Add("🔄 Làm mới Usage", null, async (s, e) => await RefreshUsageAsync(showFeedback: true));
             _menuFont = new Font(System.Drawing.SystemFonts.MenuFont ?? System.Drawing.SystemFonts.DefaultFont, System.Drawing.FontStyle.Bold);
-            _updateMenuItem = new ToolStripMenuItem("⬆ Cập nhật", null, async (s, e) => await PromptAndApplyUpdateAsync())
+            _updateMenuItem = new ToolStripMenuItem("⬆ Cập nhật", null, (s, e) =>
+            {
+                if (_availableUpdate != null) HandleManualUpdateFound(_availableUpdate);
+            })
             {
                 Visible = false,
                 Font = _menuFont
@@ -286,6 +345,35 @@ namespace ClaudeUsageTracker
             _syncPauseMenuItem = new ToolStripMenuItem("⏸ Tạm dừng sync");
             _syncPauseMenuItem.Click += (s, e) => ToggleSyncPause();
             contextMenu.Items.Add(_syncPauseMenuItem);
+
+            var toolsMenu = new ToolStripMenuItem("🧰 Công cụ tối ưu Token");
+            toolsMenu.DropDownItems.Add("🖼 Nén ảnh Clipboard (tiết kiệm Vision token)", null, (s, e) => CompressClipboardImageAction());
+            toolsMenu.DropDownItems.Add("🔌 Kiểm tra 'Thuế' MCP Server", null, (s, e) => InspectMcpAction());
+            toolsMenu.DropDownItems.Add("📁 Quét dự án (CLAUDE.md & .claudeignore)", null, (s, e) => AuditProjectAction());
+            contextMenu.Items.Add(toolsMenu);
+
+            var promptsMenu = new ToolStripMenuItem("📋 Prompt tiết kiệm token");
+            promptsMenu.DropDownItems.Add("Chỉ trả về diff code cần sửa, không giải thích dài", null, (s, e) =>
+                CopyPromptSnippet("Chỉ trả về code diff cần sửa, không giải thích dài dòng."));
+            promptsMenu.DropDownItems.Add("Trả lời ngắn gọn tối đa 5 dòng", null, (s, e) =>
+                CopyPromptSnippet("Trả lời ngắn gọn tối đa 5 dòng, đi thẳng vào giải pháp."));
+            promptsMenu.DropDownItems.Add("Chỉ liệt kê file và số dòng lỗi", null, (s, e) =>
+                CopyPromptSnippet("Chỉ liệt kê tên file và số dòng bị lỗi, chưa cần sửa."));
+            contextMenu.Items.Add(promptsMenu);
+
+            var privacyItem = new ToolStripMenuItem("👁 Chế độ riêng tư (Ẩn khi share màn hình)")
+            {
+                Checked = _config.PrivacyMode,
+                CheckOnClick = true
+            };
+            privacyItem.Click += (s, e) =>
+            {
+                _config.PrivacyMode = privacyItem.Checked;
+                ConfigService.Save(_config);
+                if (_config.PrivacyMode) _hud?.Hide();
+            };
+            contextMenu.Items.Add(privacyItem);
+
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
             contextMenu.Items.Add("🐛 Báo lỗi", null, (s, e) =>
@@ -397,12 +485,13 @@ namespace ClaudeUsageTracker
             return string.Join("+", parts);
         }
 
+        private bool IsContextMenuOpen => _isMenuOpen || _notifyIcon?.ContextMenuStrip?.Visible == true;
+
         private void ToggleHud()
         {
             RunOnUi(async () =>
             {
-                // Tray icon đã hiện trước khi _hud được tạo (OnStartup còn đang await sync) → click sớm sẽ NRE.
-                if (_hud == null) return;
+                if (_hud == null || IsContextMenuOpen) return;
                 if (_hud.IsVisible)
                 {
                     _hud.HideByUser();
@@ -484,11 +573,15 @@ namespace ClaudeUsageTracker
         {
             if (_notifyIcon != null)
             {
+                // Khi menu chuột phải đang mở, KHÔNG sửa Text hay Icon vì Shell_NotifyIcon(NIM_MODIFY)
+                // trong Windows Shell sẽ ngay lập tức huỷ bỏ popup menu đang hiện.
+                if (IsContextMenuOpen) return;
+
                 string tip = $"Claude: {info.PercentUsed:0}% | {info.MessagesRemaining}";
                 // NotifyIcon.Text giới hạn 63 ký tự. Cắt theo text element chứ không theo char:
                 // Substring giữa một surrogate pair (emoji) sinh ký tự rác.
                 if (tip.Length > 63) tip = Truncate(tip, 60) + "...";
-                _notifyIcon.Text = tip;
+                if (_notifyIcon.Text != tip) _notifyIcon.Text = tip;
 
                 // Đẩy màu icon lên một mức khi có cảnh báo đang tồn tại (dự báo cạn quota, ngữ cảnh phình to).
                 string hex = info.StatusColorHex;
@@ -496,7 +589,7 @@ namespace ClaudeUsageTracker
                 else if (info.ConditionLevel == AlertLevel.Warn && hex == "#10B981") hex = "#F59E0B";
 
                 int pct = (int)Math.Round(info.PercentUsed);
-                if ((hex != _lastIconHex || pct != _lastIconPct) && _notifyIcon.ContextMenuStrip?.Visible != true)
+                if (hex != _lastIconHex || pct != _lastIconPct)
                 {
                     _lastIconHex = hex;
                     _lastIconPct = pct;
@@ -534,6 +627,8 @@ namespace ClaudeUsageTracker
             ToastWindow.ShowToast(title, text, toastIcon);
         }
 
+        private bool _checkingUpdate;
+
         private async Task CheckForUpdateAsync(bool manual, TimeSpan? delay = null)
         {
             if (delay.HasValue) await Task.Delay(delay.Value);
@@ -543,6 +638,9 @@ namespace ClaudeUsageTracker
                 if (!_config.EnableUpdateCheck) return;
                 if (DateTime.UtcNow - _updateState.LastCheckUtc < TimeSpan.FromHours(6)) return;
             }
+
+            if (_checkingUpdate) return;
+            _checkingUpdate = true;
 
             try
             {
@@ -563,13 +661,7 @@ namespace ClaudeUsageTracker
                         _updateState.NotifiedTag = release.Tag;
                         if (manual)
                         {
-                            // Manual: chỉ MessageBox (rõ hơn toast)
-                            string notes = string.IsNullOrWhiteSpace(release.Notes) ? "" : $"\n\n{release.Notes}";
-                            var ans = MessageBox.Show(
-                                $"Có bản mới {release.Tag} (đang dùng v{UpdateLogic.Normalize(CurrentVersion())}).{notes}\n\nMở trang tải về trên GitHub?",
-                                "Kiểm tra bản mới", MessageBoxButton.YesNo, MessageBoxImage.Information);
-                            if (ans == MessageBoxResult.Yes)
-                                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(release.HtmlUrl) { UseShellExecute = true });
+                            HandleManualUpdateFound(release);
                         }
                         else
                         {
@@ -591,6 +683,226 @@ namespace ClaudeUsageTracker
             {
                 if (manual)
                     MessageBox.Show($"Không kiểm tra được bản mới:\n{ex.Message}", "Kiểm tra bản mới", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+            finally
+            {
+                _checkingUpdate = false;
+            }
+        }
+
+        private void HandleManualUpdateFound(ReleaseInfo release)
+        {
+            string currentVer = UpdateLogic.Normalize(CurrentVersion()).ToString(3);
+            string notes = string.IsNullOrWhiteSpace(release.Notes) ? "" : $"\n\nNội dung mới:\n{release.Notes}";
+            string? gitRoot = FindGitRepoRoot();
+
+            if (gitRoot != null)
+            {
+                // Người dùng đang chạy từ bản clone git
+                var ans = MessageBox.Show(
+                    $"Có bản mới {release.Tag} (đang dùng v{currentVer}).{notes}\n\n" +
+                    "Bạn có muốn mở cửa sổ Terminal (CMD) để tự động cập nhật ngay không?\n" +
+                    "(Sẽ chạy 'git pull', build lại Release và khởi động lại, không cần tải từ web)",
+                    "Kiểm tra bản mới - Claude Usage Tracker",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (ans == MessageBoxResult.Yes)
+                {
+                    RunGitUpdateTerminal(gitRoot);
+                }
+                else
+                {
+                    var webAns = MessageBox.Show("Bạn có muốn xem trang phát hành trên trình duyệt web không?",
+                        "GitHub Releases", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (webAns == MessageBoxResult.Yes)
+                        Process.Start(new ProcessStartInfo(release.HtmlUrl) { UseShellExecute = true });
+                }
+            }
+            else
+            {
+                // Người dùng chạy bản cài đặt standalone
+                var ans = MessageBox.Show(
+                    $"Có bản mới {release.Tag} (đang dùng v{currentVer}).{notes}\n\n" +
+                    "Bạn có muốn mở cửa sổ Terminal (PowerShell) để tự động tải, kiểm tra SHA-256 và cập nhật ngay không?\n" +
+                    "(Cập nhật tự động trực tiếp trong terminal, không cần tải thủ công từ web)",
+                    "Kiểm tra bản mới - Claude Usage Tracker",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Information);
+
+                if (ans == MessageBoxResult.Yes)
+                {
+                    RunPowerShellUpdateTerminal(release);
+                }
+                else
+                {
+                    var webAns = MessageBox.Show("Bạn có muốn xem trang phát hành trên trình duyệt web không?",
+                        "GitHub Releases", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                    if (webAns == MessageBoxResult.Yes)
+                        Process.Start(new ProcessStartInfo(release.HtmlUrl) { UseShellExecute = true });
+                }
+            }
+        }
+
+        private static string? FindGitRepoRoot()
+        {
+            try
+            {
+                string? current = AppContext.BaseDirectory;
+                for (int i = 0; i < 5 && current != null; i++)
+                {
+                    if (Directory.Exists(Path.Combine(current, ".git")))
+                        return current;
+                    current = Path.GetDirectoryName(current);
+                }
+            }
+            catch { }
+            return null;
+        }
+
+        private void RunGitUpdateTerminal(string gitRoot)
+        {
+            try
+            {
+                string batPath = Path.Combine(gitRoot, "update.bat");
+                if (!File.Exists(batPath))
+                {
+                    string script =
+@"@echo off
+title Cap nhat Claude Usage Tracker tu GitHub
+setlocal enabledelayedexpansion
+cd /d ""%~dp0""
+echo ========================================================
+echo   CAP NHAT CLAUDE USAGE TRACKER TU GITHUB
+echo ========================================================
+echo.
+echo [1/3] Dong ung dung Claude Usage Tracker dang chay...
+taskkill /f /im ClaudeUsageTracker.exe >nul 2>&1
+timeout /t 1 >nul
+echo.
+echo [2/3] Dang lay ma nguon moi nhat tu Git (git pull)...
+git pull
+if errorlevel 1 (
+    echo.
+    echo [LOI] git pull that bai. Vui long kiem tra ket noi mang hoac xung dot git.
+    pause
+    exit /b 1
+)
+echo.
+echo [3/3] Dang build lai ban Release...
+cd /d ""%~dp0csharp""
+dotnet build ClaudeUsageTracker.csproj -c Release
+if errorlevel 1 (
+    echo.
+    echo [LOI] Build that bai.
+    pause
+    exit /b 1
+)
+echo.
+echo [HOAN TAT] Dang khoi dong lai Claude Usage Tracker...
+start """" ""%~dp0csharp\bin\Release\net11.0-windows\ClaudeUsageTracker.exe""
+echo.
+echo ========================================================
+echo   CAP NHAT HOAN TAT THANH CONG!
+echo ========================================================
+timeout /t 3 >nul
+exit /b 0";
+                    File.WriteAllText(batPath, script, System.Text.Encoding.UTF8);
+                }
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c start \"Cap nhat Claude Usage Tracker tu Git\" \"{batPath}\"",
+                    UseShellExecute = true
+                });
+                ExitApplication();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Không mở được terminal cập nhật:\n{ex.Message}", "Lỗi cập nhật", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void RunPowerShellUpdateTerminal(ReleaseInfo release)
+        {
+            try
+            {
+                string appDir = AppDomain.CurrentDomain.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+                string tempScript = Path.Combine(Path.GetTempPath(), "claude-tracker-update.ps1");
+                string psCode =
+$@"[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$ErrorActionPreference = 'Stop'
+Write-Host '========================================================' -ForegroundColor Cyan
+Write-Host '  DANG CAP NHAT CLAUDE USAGE TRACKER LEN {release.Tag}' -ForegroundColor Cyan
+Write-Host '========================================================' -ForegroundColor Cyan
+Write-Host ''
+Write-Host '[1/4] Cho ung dung Claude Usage Tracker dong hoan toan...' -ForegroundColor Yellow
+Start-Sleep -Seconds 1
+Stop-Process -Name 'ClaudeUsageTracker' -Force -ErrorAction SilentlyContinue
+Start-Sleep -Seconds 1
+
+$tempDir = Join-Path $env:TEMP 'ClaudeUsageTrackerUpdate'
+New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+$zipPath = Join-Path $tempDir '{release.ZipName}'
+$sumsPath = Join-Path $tempDir 'SHA256SUMS.txt'
+
+Write-Host '[2/4] Dang tai ban moi tu GitHub...' -ForegroundColor Yellow
+Invoke-WebRequest -UseBasicParsing -Uri '{release.ZipUrl}' -OutFile $zipPath
+Invoke-WebRequest -UseBasicParsing -Uri '{release.SumsUrl}' -OutFile $sumsPath
+
+Write-Host '[3/4] Kiem tra ma bam SHA-256...' -ForegroundColor Yellow
+$hash = (Get-FileHash -Path $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$sumsContent = Get-Content $sumsPath
+$pattern = [regex]::Escape('{release.ZipName}')
+$matchedLine = $sumsContent | Where-Object {{ $_ -match $pattern }} | Select-Object -First 1
+$expected = if ($matchedLine) {{ (($matchedLine -split '\s+')[0]).ToLowerInvariant() }} else {{ '' }}
+
+if ([string]::IsNullOrEmpty($expected) -or $hash -ne $expected) {{
+    Write-Host '[LOI] SHA-256 khong khop! Huy cap nhat de dam bao an toan.' -ForegroundColor Red
+    Read-Host 'Nhan Enter de thoat...'
+    exit 1
+}}
+Write-Host '  [OK] SHA-256 hop le!' -ForegroundColor Green
+
+Write-Host '[4/4] Giai nen vao thu muc phien ban moi...' -ForegroundColor Yellow
+# KHONG giai nen de len thu muc dang chay: file .dll cua ban cu co the chua nha het
+# handle kip (Stop-Process khong dam bao), Expand-Archive -Force giua chung se de lai
+# ban cai da hong mot nua. Giai nen sang thu muc rieng ben canh roi khoi dong tu do,
+# giong het co che cua nut ""Cap nhat"" trong app (PromptAndApplyUpdateAsync).
+$oldDir = '{appDir.Replace("'", "''")}'
+$parentDir = Split-Path $oldDir -Parent
+$newDir = Join-Path $parentDir 'ClaudeUsageTracker-{release.Tag.Replace("'", "''")}'
+if (Test-Path $newDir) {{ Remove-Item $newDir -Recurse -Force -ErrorAction SilentlyContinue }}
+Expand-Archive -Path $zipPath -DestinationPath $newDir -Force
+Remove-Item $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+
+# Don cac ban cai cu khac (tru ban dang chay va ban vua cai) de khong phinh dia.
+Get-ChildItem -Path $parentDir -Directory -Filter 'ClaudeUsageTracker-*' -ErrorAction SilentlyContinue |
+    Where-Object {{ $_.FullName -ne $newDir -and $_.FullName -ne $oldDir }} |
+    ForEach-Object {{ Remove-Item $_.FullName -Recurse -Force -ErrorAction SilentlyContinue }}
+
+Write-Host ''
+Write-Host '========================================================' -ForegroundColor Green
+Write-Host '  CAP NHAT HOAN TAT! DANG KHOI DONG LAI UNG DUNG...' -ForegroundColor Green
+Write-Host '========================================================' -ForegroundColor Green
+Start-Process (Join-Path $newDir 'ClaudeUsageTracker.exe')
+Start-Sleep -Seconds 2
+";
+                File.WriteAllText(tempScript, psCode, System.Text.Encoding.UTF8);
+
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = "powershell.exe",
+                    Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{tempScript}\"",
+                    UseShellExecute = true
+                });
+                ExitApplication();
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Không mở được terminal cập nhật:\n{ex.Message}", "Lỗi cập nhật", MessageBoxButton.OK, MessageBoxImage.Warning);
             }
         }
 
@@ -711,12 +1023,20 @@ namespace ClaudeUsageTracker
             if (result == true)
             {
                 ConfigService.Save(_config);
+                _hud?.ApplyOpacity(_config.HudOpacity);
+                // Nhả tạm 2 hotkey nhanh trước: nếu người dùng vừa đổi hotkey HUD/Stats trùng
+                // Ctrl+Shift+H/C, bên giữ trước (hotkey nhanh) sẽ làm Reregister bên dưới fail oan.
+                _hotkeyQuickHaiku?.Unregister();
+                _hotkeyQuickCompact?.Unregister();
+
                 bool hudOk = true, statsOk = true;
                 try { hudOk = _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey) ?? true; } catch { hudOk = false; }
                 try { statsOk = _hotkeyStats?.Reregister(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey) ?? true; } catch { statsOk = false; }
                 if (!hudOk || !statsOk)
                     ToastWindow.ShowToast("Không đăng ký được phím tắt",
                         "Tổ hợp phím đang bị ứng dụng khác chiếm. Hãy chọn tổ hợp khác trong Cài đặt.", "🟡");
+
+                RegisterQuickHotkeys();
                 if (_hudMenuItem != null)
                     _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
                 // Khởi động lại vòng sync nền: lúc khởi động nếu chưa có SessionKey thì vòng lặp không bao giờ chạy,
@@ -791,7 +1111,101 @@ namespace ClaudeUsageTracker
             }
         }
 
+        private void CompressClipboardImageAction()
+        {
+            var (ok, msg) = TokenToolkitService.CompressClipboardImage();
+            ToastWindow.ShowToast(ok ? "🖼 Đã nén ảnh Clipboard" : "🖼 Nén ảnh Clipboard", msg, ok ? "✔" : "ℹ️");
+        }
+
+        private void InspectMcpAction()
+        {
+            var res = TokenToolkitService.InspectMcpServers();
+            string list = res.ServerNames.Count > 0 ? "\n• " + string.Join("\n• ", res.ServerNames) : "\n(Không phát hiện MCP server nào)";
+            MessageBox.Show(
+                $"Tổng MCP Server đang bật: {res.TotalCount} (Desktop: {res.DesktopCount}, CLI: {res.CliCount})\n" +
+                $"Ước tính 'thuế' schema mỗi lượt chat: ~{res.EstimatedTokensPerTurn:N0} tokens\n" +
+                $"{list}\n\n" +
+                "Mẹo: Tắt bớt MCP không dùng tới để giảm tốc độ đốt quota!",
+                "Kiểm tra MCP Overhead", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+
+        private void AuditProjectAction()
+        {
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "Chọn thư mục dự án muốn kiểm tra tối ưu Token",
+                UseDescriptionForTitle = true
+            };
+            if (dlg.ShowDialog() != System.Windows.Forms.DialogResult.OK) return;
+
+            var (_, hasIgnore, summary) = TokenToolkitService.AuditProject(dlg.SelectedPath);
+            if (!hasIgnore)
+            {
+                var ans = MessageBox.Show(
+                    $"Kết quả kiểm tra {Path.GetFileName(dlg.SelectedPath)}:\n\n{summary}\n\nBạn có muốn tự động tạo file .claudeignore chuẩn ngay bây giờ không?",
+                    "Quét dự án tối ưu Token", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (ans == MessageBoxResult.Yes)
+                {
+                    bool created = TokenToolkitService.CreateDefaultClaudeIgnore(dlg.SelectedPath);
+                    ToastWindow.ShowToast(created ? "✔ Đã tạo .claudeignore" : "⚠ Không tạo được .claudeignore",
+                        dlg.SelectedPath, created ? "📁" : "⚠️");
+                }
+            }
+            else
+            {
+                MessageBox.Show($"Kết quả kiểm tra {Path.GetFileName(dlg.SelectedPath)}:\n\n{summary}",
+                    "Quét dự án tối ưu Token", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+        }
+
+        private void CopyPromptSnippet(string prompt)
+        {
+            try
+            {
+                System.Windows.Clipboard.SetText(prompt);
+                ToastWindow.ShowToast("📋 Đã copy Prompt mẫu", prompt, "📋");
+            }
+            catch { }
+        }
+
         private bool _isExiting;
+        private Task<(bool Ok, string Message)> SendTerminalCommandAsync(string command) =>
+            TerminalCommandService.SendCommandAsync(_foregroundWatcher?.LastTargetHwnd ?? IntPtr.Zero, command);
+
+        private const uint QuickHaikuModifiers = 0x0006, QuickHaikuVk = 0x48;     // Ctrl+Shift+H
+        private const uint QuickCompactModifiers = 0x0006, QuickCompactVk = 0x43; // Ctrl+Shift+C
+
+        // Ctrl+Shift+H/C gắn cứng (chưa cho đổi trong Settings). Nếu người dùng đặt hotkey HUD/Stats
+        // trùng tổ hợp này, RegisterHotKey của Windows chỉ cho MỘT nơi giữ cùng tổ hợp — bên đăng ký
+        // sau sẽ fail âm thầm. Kiểm tra trước và báo cho người dùng biết thay vì để mất tính năng không rõ lý do.
+        private void RegisterQuickHotkeys()
+        {
+            bool haikuCollides = Collides(QuickHaikuModifiers, QuickHaikuVk);
+            bool compactCollides = Collides(QuickCompactModifiers, QuickCompactVk);
+
+            if (!haikuCollides)
+            {
+                try { _hotkeyQuickHaiku?.Register(QuickHaikuModifiers, QuickHaikuVk); } catch { }
+            }
+            if (!compactCollides)
+            {
+                try { _hotkeyQuickCompact?.Register(QuickCompactModifiers, QuickCompactVk); } catch { }
+            }
+
+            if (haikuCollides || compactCollides)
+            {
+                string which = haikuCollides && compactCollides ? "⚡ Haiku (Ctrl+Shift+H) và 🧹 Compact (Ctrl+Shift+C)"
+                    : haikuCollides ? "⚡ Haiku (Ctrl+Shift+H)" : "🧹 Compact (Ctrl+Shift+C)";
+                ToastWindow.ShowToast("⚠ Phím tắt nhanh bị trùng",
+                    $"{which} trùng với phím tắt HUD/Thống kê bạn đã đặt trong Cài đặt nên không hoạt động. Đổi một trong hai tổ hợp để dùng được cả hai.",
+                    "⚠️");
+            }
+        }
+
+        private bool Collides(uint mod, uint vk) =>
+            (mod == _config.HotkeyModifiers && vk == _config.HotkeyVirtualKey) ||
+            (mod == _config.StatsHotkeyModifiers && vk == _config.StatsHotkeyVirtualKey);
+
         private void ExitApplication()
         {
             if (_isExiting) return;
@@ -800,6 +1214,8 @@ namespace ClaudeUsageTracker
             _updateTimer?.Stop();
             _hotkey?.Dispose();
             _hotkeyStats?.Dispose();
+            _hotkeyQuickHaiku?.Dispose();
+            _hotkeyQuickCompact?.Dispose();
             _apiSync?.Dispose();
             _updater?.Dispose();
             _webhookHttp.Dispose();

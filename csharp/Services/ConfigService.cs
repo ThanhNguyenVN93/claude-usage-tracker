@@ -35,6 +35,12 @@ namespace ClaudeUsageTracker.Services
         // Vị trí HUD người dùng đã kéo tới (NaN = chưa đặt, dùng góc dưới phải mặc định)
         public double HudLeft { get; set; } = double.NaN;
         public double HudTop { get; set; } = double.NaN;
+        // Âm thanh cảnh báo khi chạm ngưỡng nguy hiểm hoặc phát hiện lặp vô tận
+        public bool EnableSoundAlert { get; set; } = false;
+        // Chế độ riêng tư: ẩn HUD và tắt toast khi chia sẻ màn hình / họp
+        public bool PrivacyMode { get; set; } = false;
+        // Độ mờ của HUD (0.65 - 1.0)
+        public double HudOpacity { get; set; } = 1.0;
     }
 
     public static class ConfigService

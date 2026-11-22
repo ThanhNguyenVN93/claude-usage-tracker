@@ -78,6 +78,38 @@ Console.WriteLine("StatsService.ComputeProjection");
     Check("đã 100%: báo đã chạm trần", StatsService.ComputeProjection(full, now, reset).Text.Contains("chạm trần"));
 }
 
+Console.WriteLine("StatsService.ProjectBurn + WeeklyBudget + PromptsEst");
+{
+    var projSamples = new List<UsageSample>
+    {
+        new(now.AddMinutes(-20), 10, 10, "Sonnet", Project: "repo-a"),
+        new(now.AddMinutes(-15), 22, 10, "Sonnet", Project: "repo-a"), // +12 repo-a
+        new(now.AddMinutes(-10), 27, 10, "Sonnet", Project: "repo-b"), // +5 repo-b
+    };
+    var pb = StatsService.ComputeProjectBurn(projSamples, now, TimeSpan.FromHours(1));
+    Check("project burn: repo-a = 12", pb.Items.Count == 2 && pb.Items[0].Model == "repo-a" && Math.Abs(pb.Items[0].Percent - 12) < 0.01);
+    Check("project burn: repo-b = 5", Math.Abs(pb.Items[1].Percent - 5) < 0.01);
+
+    var wb = StatsService.ComputeWeeklyBudgetNote(40, now.AddDays(3), now);
+    Check("weekly budget: còn 60% / 3.0 ngày (~20%/ngày)", wb != null && wb.Contains("60%") && wb.Contains("20%/ngày"));
+    Check("weekly budget null khi quá hạn", StatsService.ComputeWeeklyBudgetNote(40, now.AddHours(-1), now) == null);
+
+    var pe = StatsService.EstimateRemainingPromptsNote(50);
+    Check("prompts est 50%: có Opus/Sonnet/Haiku", pe != null && pe.Contains("Opus") && pe.Contains("Sonnet") && pe.Contains("Haiku"));
+    Check("prompts est 100%: null", StatsService.EstimateRemainingPromptsNote(100) == null);
+
+    var loopSamples = new List<UsageSample>
+    {
+        new(now.AddMinutes(-4), 20, 10, "Opus", SessionId: "s-loop"),
+        new(now.AddMinutes(-3), 24, 10, "Opus", SessionId: "s-loop"),
+        new(now.AddMinutes(-2), 28, 10, "Opus", SessionId: "s-loop"),
+        new(now.AddMinutes(-1), 33, 10, "Opus", SessionId: "s-loop"),
+    };
+    var loopDelta = StatsService.DetectInfiniteLoop(loopSamples, now, "s-loop");
+    Check("loop detector: +13% trong 4 phút => phát hiện", loopDelta.HasValue && Math.Abs(loopDelta.Value - 13) < 0.01);
+    Check("loop detector: session khác => null", StatsService.DetectInfiniteLoop(loopSamples, now, "s-other") == null);
+}
+
 Console.WriteLine("StatsService.EstimateNow");
 {
     var reset = now.AddHours(2);
@@ -514,6 +546,17 @@ Console.WriteLine("ClaudeUsageService");
         $"(got {info.WeeklyResetTime})");
     Check("đọc costUsd (trước đây bị bỏ không dùng)", info.SessionCostUsd == 1.25, $"(got {info.SessionCostUsd})");
     Check("giờ reset 5h đúng", Math.Abs((info.ResetTime - fhReset).TotalSeconds) < 2, $"(got {info.ResetTime})");
+
+    // Khi Desktop mới hơn CLI, ApplyCliResetTimes vẫn phải mượn được cả sevenDayResetsAt
+    string deskPath = Path.Combine(dir, "plan-usage-history.json");
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY", deskPath);
+    File.WriteAllText(deskPath,
+        $"{{\"samples\":[{{\"t\":{NowMs() + 5000},\"u\":{{\"fh\":55,\"sd\":20}}}}]}}");
+    var fromDesk = svc.GetUsageAsync(cfg).GetAwaiter().GetResult();
+    Check("Desktop mới hơn vẫn mượn sevenDayResetsAt từ CLI",
+        fromDesk.PercentUsed == 55 && fromDesk.WeeklyResetTime.HasValue && Math.Abs((fromDesk.WeeklyResetTime.Value - sdReset).TotalSeconds) < 2,
+        $"(pct={fromDesk.PercentUsed} wr={fromDesk.WeeklyResetTime})");
+    File.Delete(deskPath);
 
     // Không có nguồn nào: ResetTime phải là default chứ không phải Now (nếu không đồng hồ
     // đếm ngược hiện "đã reset" ngay khi mở).

@@ -32,6 +32,12 @@ namespace ClaudeUsageTracker.Models
         public double? ContextPercent { get; set; }
         public string? SessionId { get; set; }
         public string? ProjectionText { get; set; }
+        // Nhịp tiêu thụ quota hiện tại (%/giờ), tính từ hồi quy mẫu gần nhất.
+        public double? BurnRatePerHour { get; set; }
+        // Ngân sách quota tuần an toàn mỗi ngày (Weekly Quota Guard).
+        public string? WeeklyBudgetNote { get; set; }
+        // Ước lượng số tin nhắn an toàn còn lại theo model.
+        public string? RemainingPromptsNote { get; set; }
         // Mức cảnh báo đang tồn tại (khác với cảnh báo "bắn một lần"): dùng để đẩy màu icon.
         public AlertLevel ConditionLevel { get; set; } = AlertLevel.None;
         // Model đang dùng (chỉ có khi đọc từ CLI statusline).

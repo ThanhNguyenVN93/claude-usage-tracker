@@ -8,6 +8,8 @@ namespace ClaudeUsageTracker.Services
     public record StatsSnapshot(
         ModelBurnReport Burn24h,
         ModelBurnReport Burn7d,
+        ModelBurnReport ProjectBurn24h,
+        ModelBurnReport ProjectBurn7d,
         Projection Projection,
         IReadOnlyList<SeriesPoint> Fh24h,
         IReadOnlyList<SeriesPoint> Fh7d,
@@ -20,6 +22,7 @@ namespace ClaudeUsageTracker.Services
         private readonly HistoryService _history;
         private readonly AppConfig _config;
         private readonly AlertState _state;
+        private DateTime _lastLoopAlertAt;
 
         public InsightsService(HistoryService history, AppConfig config)
         {
@@ -35,6 +38,9 @@ namespace ClaudeUsageTracker.Services
             var projection = StatsService.ComputeProjection(samples, now, ValidReset(info, now));
 
             info.ProjectionText = info.IsDemo ? null : projection.Text;
+            info.BurnRatePerHour = (!info.IsDemo && projection.RatePerHour >= 0.5) ? projection.RatePerHour : null;
+            info.WeeklyBudgetNote = info.IsDemo ? null : StatsService.ComputeWeeklyBudgetNote(info.WeeklyPercent, info.WeeklyResetTime, now);
+            info.RemainingPromptsNote = info.IsDemo ? null : StatsService.EstimateRemainingPromptsNote(info.PercentUsed);
             info.ConditionLevel = ComputeCondition(info, projection);
             AttachEstimate(info, samples, now);
 
@@ -42,6 +48,16 @@ namespace ClaudeUsageTracker.Services
 
             var input = new AlertInput(info.PercentUsed, info.WeeklyPercent, info.ContextPercent, info.SessionId, projection, now);
             var alerts = AlertEngine.Evaluate(input, BuildAlertConfig(), _state);
+
+            if ((now - _lastLoopAlertAt).TotalMinutes >= 10
+                && StatsService.DetectInfiniteLoop(samples, now, info.SessionId) is double loopDelta)
+            {
+                _lastLoopAlertAt = now;
+                alerts.Add(new Alert(
+                    "Cảnh báo: Đốt quota bất thường!",
+                    $"Phiên hiện tại vừa đốt +{loopDelta:0}% trong 5 phút qua. Kiểm tra xem Agent có đang lặp lỗi không!",
+                    AlertLevel.Critical));
+            }
 
             // Lưu theo trạng thái đổi, không theo số cảnh báo: "đã chạm trần" và các lần tái vũ trang
             // không sinh cảnh báo nào nhưng vẫn phải sống sót qua restart.
@@ -94,6 +110,8 @@ namespace ClaudeUsageTracker.Services
             return new StatsSnapshot(
                 StatsService.ComputeModelBurn(samples, now, TimeSpan.FromHours(24)),
                 StatsService.ComputeModelBurn(samples, now, TimeSpan.FromDays(7)),
+                StatsService.ComputeProjectBurn(samples, now, TimeSpan.FromHours(24)),
+                StatsService.ComputeProjectBurn(samples, now, TimeSpan.FromDays(7)),
                 StatsService.ComputeProjection(samples, now, ValidReset(info, now)),
                 StatsService.BuildSeries(samples, now, TimeSpan.FromHours(24), s => s.FiveHour),
                 StatsService.BuildSeries(samples, now, TimeSpan.FromDays(7), s => s.FiveHour),

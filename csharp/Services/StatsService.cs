@@ -35,9 +35,16 @@ namespace ClaudeUsageTracker.Services
 
         // Ước lượng % quota 5h mỗi model đã tiêu trong cửa sổ thời gian.
         // Quota dùng chung nhiều nơi, nên đây chỉ là ước lượng.
-        public static ModelBurnReport ComputeModelBurn(IReadOnlyList<UsageSample> samples, DateTime now, TimeSpan window)
+        public static ModelBurnReport ComputeModelBurn(IReadOnlyList<UsageSample> samples, DateTime now, TimeSpan window) =>
+            ComputeBurnBy(samples, now, window, s => s.Model);
+
+        // Ước lượng % quota 5h mỗi thư mục dự án (CLI) đã tiêu trong cửa sổ thời gian.
+        public static ModelBurnReport ComputeProjectBurn(IReadOnlyList<UsageSample> samples, DateTime now, TimeSpan window) =>
+            ComputeBurnBy(samples, now, window, s => s.Project);
+
+        private static ModelBurnReport ComputeBurnBy(IReadOnlyList<UsageSample> samples, DateTime now, TimeSpan window, Func<UsageSample, string?> keySelector)
         {
-            var totals = new Dictionary<string, double>();
+            var totals = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
             DateTime from = now - window;
 
             for (int i = 1; i < samples.Count; i++)
@@ -48,13 +55,14 @@ namespace ClaudeUsageTracker.Services
                 // Cả hai đầu phải nằm trong cửa sổ: cặp bắc qua biên sẽ quy trọn phần tiêu
                 // của khoảng thời gian trước đó vào cửa sổ này.
                 if (a.Time < from || b.Time > now) continue;
-                if (b.Model == null) continue;
+                string? key = keySelector(b);
+                if (string.IsNullOrWhiteSpace(key)) continue;
                 if (b.Time - a.Time > MaxPairGap || b.Time < a.Time) continue;
 
                 double delta = b.FiveHour - a.FiveHour;
                 if (delta <= 0) continue; // 0 = không tiêu; âm = đã reset chu kỳ
 
-                totals[b.Model] = totals.GetValueOrDefault(b.Model) + delta;
+                totals[key] = totals.GetValueOrDefault(key) + delta;
             }
 
             double sum = totals.Values.Sum();
@@ -64,6 +72,31 @@ namespace ClaudeUsageTracker.Services
                 .ToList();
 
             return new ModelBurnReport(items, sum);
+        }
+
+        // Tính ngân sách quota tuần an toàn mỗi ngày (Weekly Quota Guard).
+        public static string? ComputeWeeklyBudgetNote(double weeklyPercent, DateTime? weeklyResetTime, DateTime now)
+        {
+            if (!weeklyResetTime.HasValue || weeklyResetTime.Value <= now) return null;
+            double remaining = Math.Max(0, 100 - weeklyPercent);
+            double daysLeft = (weeklyResetTime.Value - now).TotalDays;
+            if (daysLeft <= 0.05) return null;
+
+            double perDay = remaining / Math.Max(1.0, daysLeft);
+            return daysLeft >= 1.0
+                ? $"Ngân sách tuần: còn {remaining:0}% / {daysLeft:0.0} ngày (~{perDay:0}%/ngày)"
+                : $"Ngân sách tuần: còn {remaining:0}% cho {Fmt(weeklyResetTime.Value - now)} cuối";
+        }
+
+        // Ước lượng nhanh số tin nhắn an toàn còn lại theo từng dòng model trong chu kỳ 5h.
+        public static string? EstimateRemainingPromptsNote(double percentUsed)
+        {
+            double rem = Math.Max(0, 100 - percentUsed);
+            if (rem < 1) return null;
+            int opus = Math.Max(1, (int)Math.Floor(rem * 0.45));   // ~45 tin / 100%
+            int sonnet = Math.Max(1, (int)Math.Floor(rem * 1.2));  // ~120 tin / 100%
+            int haiku = Math.Max(1, (int)Math.Floor(rem * 3.5));   // ~350 tin / 100%
+            return $"Ước còn: ~{opus} Opus | ~{sonnet} Sonnet | ~{haiku} Haiku";
         }
 
         // Dự báo thời điểm chạm 100% của chu kỳ 5h dựa trên nhịp tiêu gần đây.
@@ -187,6 +220,21 @@ namespace ClaudeUsageTracker.Services
         {
             if (span.TotalHours >= 1) return $"{(int)span.TotalHours}h {span.Minutes}m";
             return $"{Math.Max(1, (int)span.TotalMinutes)}m";
+        }
+
+        // Phát hiện dấu hiệu Claude Code bị kẹt vòng lặp (đốt >= 10% quota trong vòng 5 phút).
+        public static double? DetectInfiniteLoop(IReadOnlyList<UsageSample> samples, DateTime now, string? sessionId)
+        {
+            if (string.IsNullOrWhiteSpace(sessionId)) return null;
+            DateTime cutoff = now.AddMinutes(-5);
+            var recent = samples
+                .Where(s => s.Time >= cutoff && s.Time <= now && string.Equals(s.SessionId, sessionId, StringComparison.Ordinal))
+                .OrderBy(s => s.Time)
+                .ToList();
+
+            if (recent.Count < 4) return null;
+            double delta = recent[^1].FiveHour - recent[0].FiveHour;
+            return delta >= 10 ? delta : null;
         }
 
         private static Projection None(string text) => new(false, null, 0, false, null, text);

@@ -53,7 +53,9 @@ namespace ClaudeUsageTracker.Views
             TxtThresholds.Text = _config.AlertThresholds;
             TxtContextWarn.Text = Num(_config.ContextWarnPercent, "0");
             ChkResetReminder.IsChecked = _config.EnableResetReminder;
+            ChkSoundAlert.IsChecked = _config.EnableSoundAlert;
             ChkUpdateCheck.IsChecked = _config.EnableUpdateCheck;
+            TxtHudOpacity.Text = Num(Math.Round(_config.HudOpacity * 100), "0");
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
             TxtDivergence.Text = Num(_config.DivergenceThreshold, "0.#");
@@ -126,7 +128,11 @@ namespace ClaudeUsageTracker.Views
             else rejected.Add("Ngưỡng cảnh báo ngữ cảnh (1–100)");
 
             _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
+            _config.EnableSoundAlert = ChkSoundAlert.IsChecked == true;
             _config.EnableUpdateCheck = ChkUpdateCheck.IsChecked == true;
+            if (TryParseInt(TxtHudOpacity.Text, out int opacityPct) && opacityPct is >= 50 and <= 100)
+                _config.HudOpacity = opacityPct / 100.0;
+            else rejected.Add("Độ rõ cửa sổ HUD (50–100%)");
             _config.EnableEstimate = ChkEstimate.IsChecked == true;
 
             if (TryParseNumber(TxtDivergence.Text, out double divergence) && divergence is > 0 and <= 100)
@@ -329,6 +335,102 @@ namespace ClaudeUsageTracker.Views
             _pendingStatsMod = 0x0006; // Ctrl+Shift
             _pendingStatsVk  = 0x53;   // S
             TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
+        }
+
+        private void BtnRestoreBackup_Click(object sender, RoutedEventArgs e)
+        {
+            string settingsPath = TrackerPaths.ClaudeSettings;
+            string bakPath = settingsPath + ".tracker.bak";
+            if (!File.Exists(bakPath))
+            {
+                System.Windows.MessageBox.Show(
+                    "Chưa có file sao lưu settings.json.tracker.bak nào (chỉ tạo ra khi tính năng Tự đổi model ghi đè lần đầu).",
+                    "Khôi phục cấu hình", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            // Backup chỉ chụp MỘT LẦN, ngay lúc tính năng ghi đè lần đầu — mọi chỉnh sửa
+            // settings.json (của người dùng hoặc Claude Code CLI) SAU thời điểm đó sẽ mất
+            // sạch vì đây là ghi đè cả file, không phải chỉ khoá "model". Phải hỏi trước.
+            DateTime bakTime = File.GetLastWriteTime(bakPath);
+            var confirm = System.Windows.MessageBox.Show(
+                $"Thao tác này sẽ GHI ĐÈ TOÀN BỘ ~/.claude/settings.json hiện tại bằng bản sao lưu từ " +
+                $"{bakTime:dd/MM/yyyy HH:mm}.\n\n" +
+                "Mọi thay đổi bạn (hoặc Claude Code CLI) đã thực hiện với settings.json SAU thời điểm đó " +
+                "sẽ bị mất, không chỉ riêng khoá \"model\".\n\nBạn có chắc chắn muốn tiếp tục?",
+                "Khôi phục cấu hình — xác nhận", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.Yes) return;
+
+            try
+            {
+                File.Copy(bakPath, settingsPath, overwrite: true);
+                System.Windows.MessageBox.Show(
+                    "Đã khôi phục ~/.claude/settings.json về bản sao lưu gốc thành công!",
+                    "Khôi phục cấu hình", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Không khôi phục được:\n{ex.Message}", "Lỗi", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+        }
+
+        private void BtnCleanCache_Click(object sender, RoutedEventArgs e)
+        {
+            long freedBytes = 0;
+            int filesRemoved = 0;
+
+            try
+            {
+                string appDataDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ClaudeUsageTracker");
+                if (Directory.Exists(appDataDir))
+                {
+                    foreach (var file in Directory.EnumerateFiles(appDataDir))
+                    {
+                        string name = Path.GetFileName(file);
+                        if (name.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                            name.EndsWith(".old", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "error.log", StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(name, "error.log.old", StringComparison.OrdinalIgnoreCase))
+                        {
+                            try
+                            {
+                                freedBytes += new FileInfo(file).Length;
+                                File.Delete(file);
+                                filesRemoved++;
+                            }
+                            catch { }
+                        }
+                    }
+                }
+
+                // Dọn thêm file tạm update trong %TEMP%
+                string tempUpdate = Path.Combine(Path.GetTempPath(), "ClaudeUsageTrackerUpdate");
+                if (Directory.Exists(tempUpdate))
+                {
+                    try
+                    {
+                        foreach (var f in Directory.EnumerateFiles(tempUpdate, "*", SearchOption.AllDirectories))
+                            freedBytes += new FileInfo(f).Length;
+                        Directory.Delete(tempUpdate, true);
+                        filesRemoved++;
+                    }
+                    catch { }
+                }
+
+                string sizeText = freedBytes >= 1024 * 1024
+                    ? $"{freedBytes / (1024.0 * 1024.0):0.0} MB"
+                    : $"{freedBytes / 1024.0:0.0} KB";
+
+                System.Windows.MessageBox.Show(
+                    filesRemoved > 0
+                        ? $"Đã dọn dẹp xong {filesRemoved} mục tạm/log cũ, giải phóng {sizeText}."
+                        : "Thư mục dữ liệu hiện tại đang sạch sẽ, không có file rác cần dọn.",
+                    "Dọn Cache & Log cũ", MessageBoxButton.OK, MessageBoxImage.Information);
+            }
+            catch (Exception ex)
+            {
+                System.Windows.MessageBox.Show($"Lỗi khi dọn dẹp:\n{ex.Message}", "Dọn Cache", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
         }
 
         // Win32 modifier flags → chuỗi dễ đọc; vk → tên phím

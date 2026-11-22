@@ -70,14 +70,26 @@ namespace ClaudeUsageTracker.Services
                 if (!File.Exists(CliUsagePath)) return;
 
                 using var doc = JsonDocument.Parse(File.ReadAllText(CliUsagePath));
-                if (!doc.RootElement.TryGetProperty("fiveHourResetsAt", out var el) || el.ValueKind == JsonValueKind.Null)
-                    return;
+                var root = doc.RootElement;
 
-                var resetTime = DateTimeOffset.FromUnixTimeSeconds(el.GetInt64()).LocalDateTime;
-                if (resetTime <= DateTime.Now) return;
+                if (root.TryGetProperty("fiveHourResetsAt", out var el) && el.ValueKind == JsonValueKind.Number)
+                {
+                    var resetTime = DateTimeOffset.FromUnixTimeSeconds(el.GetInt64()).LocalDateTime;
+                    if (resetTime > DateTime.Now)
+                    {
+                        info.ResetTime = resetTime;
+                        info.ResetCountdown = FormatCountdown(resetTime);
+                    }
+                }
 
-                info.ResetTime = resetTime;
-                info.ResetCountdown = FormatCountdown(resetTime);
+                if (!info.WeeklyResetTime.HasValue
+                    && root.TryGetProperty("sevenDayResetsAt", out var wrEl)
+                    && wrEl.ValueKind == JsonValueKind.Number)
+                {
+                    var weeklyReset = DateTimeOffset.FromUnixTimeSeconds(wrEl.GetInt64()).LocalDateTime;
+                    if (weeklyReset > DateTime.Now)
+                        info.WeeklyResetTime = weeklyReset;
+                }
             }
             catch
             {

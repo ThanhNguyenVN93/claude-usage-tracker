@@ -50,9 +50,13 @@ process.stdin.on('end', () => {
     const outFile = path.join(outDir, 'cli-usage.json');
     const historyFile = path.join(outDir, 'cli-history.jsonl');
 
+    const rawCwd = (data.workspace && data.workspace.current_dir) || data.cwd || null;
+    const projectName = (rawCwd && path.basename(rawCwd)) || null;
+
     const payload = {
       t: Date.now(),
       model: (data.model && data.model.display_name) || null,
+      project: projectName,
       fiveHour: fh.used_percentage ?? null,
       fiveHourResetsAt: fh.resets_at ?? null,
       sevenDay: sd.used_percentage ?? null,
@@ -90,6 +94,7 @@ process.stdin.on('end', () => {
 
       const same = prev
         && prev.model === payload.model
+        && prev.project === payload.project
         && prev.fiveHour === payload.fiveHour
         && prev.sevenDay === payload.sevenDay
         && prev.contextPercent === payload.contextPercent
@@ -100,6 +105,7 @@ process.stdin.on('end', () => {
         const line = JSON.stringify({
           t: payload.t,
           model: payload.model,
+          project: payload.project,
           fh: payload.fiveHour,
           sd: payload.sevenDay,
           ctx: payload.contextPercent,

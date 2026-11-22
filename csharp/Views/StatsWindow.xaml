@@ -35,10 +35,12 @@
                 </Grid>
             </Border>
 
+            <ScrollViewer MaxHeight="620" VerticalScrollBarVisibility="Auto">
             <StackPanel Margin="14,10,14,12">
                 <!-- Dự báo -->
-                <TextBlock Text="DỰ BÁO" FontSize="10" FontWeight="Bold" Foreground="#6C7086"/>
+                <TextBlock Text="DỰ BÁO &amp; NGÂN SÁCH" FontSize="10" FontWeight="Bold" Foreground="#6C7086"/>
                 <TextBlock x:Name="TxtProjection" Text="" FontSize="12" Foreground="#CDD6F4" TextWrapping="Wrap" Margin="0,3,0,0"/>
+                <TextBlock x:Name="TxtWeeklyBudget" Text="" FontSize="11" Foreground="#89B4FA" TextWrapping="Wrap" Margin="0,3,0,0" Visibility="Collapsed"/>
                 <TextBlock x:Name="TxtContext" Text="" FontSize="11" Foreground="#A6ADC8" TextWrapping="Wrap" Margin="0,3,0,0"/>
 
                 <Rectangle Height="1" Fill="#313244" Margin="0,10"/>
@@ -52,6 +54,12 @@
                     </StackPanel>
                 </Grid>
                 <StackPanel x:Name="BurnPanel" Margin="0,6,0,0"/>
+
+                <Rectangle Height="1" Fill="#313244" Margin="0,10"/>
+
+                <!-- Dự án đốt quota -->
+                <TextBlock Text="DỰ ÁN ĐỐT QUOTA (CLI)" FontSize="10" FontWeight="Bold" Foreground="#6C7086"/>
+                <StackPanel x:Name="ProjectBurnPanel" Margin="0,6,0,0"/>
 
                 <Rectangle Height="1" Fill="#313244" Margin="0,10"/>
 
@@ -92,9 +100,22 @@
                     <TextBlock Text=" &gt;90%" FontSize="9" Foreground="#A6ADC8"/>
                 </StackPanel>
 
-                <TextBlock x:Name="TxtFootnote" FontSize="9" FontStyle="Italic" Foreground="#6C7086" TextWrapping="Wrap" Margin="0,10,0,0"
-                           Text="Biểu đồ lịch sử gộp cả Desktop (API sync) lẫn CLI. Phân tích theo model chỉ hoạt động khi có Claude Code CLI (statusline.js) vì API claude.ai không trả về dữ liệu per-model. Quota dùng chung nên có thể lệch."/>
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock x:Name="TxtFootnote" FontSize="9" FontStyle="Italic" Foreground="#6C7086" TextWrapping="Wrap" Margin="0,0,8,0"
+                               Text="Biểu đồ lịch sử gộp cả Desktop (API sync) lẫn CLI. Phân tích model &amp; dự án cần Claude Code CLI (statusline.js)."/>
+                    <Button Grid.Column="1" Content="📄 Xuất báo cáo" Click="BtnExportReport_Click" VerticalAlignment="Top"
+                            Background="#313244" Foreground="#89B4FA" BorderThickness="0" Padding="8,4" FontSize="10" Cursor="Hand">
+                        <Button.Resources>
+                            <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                        </Button.Resources>
+                    </Button>
+                </Grid>
             </StackPanel>
+            </ScrollViewer>
         </StackPanel>
     </Border>
 </Window>
