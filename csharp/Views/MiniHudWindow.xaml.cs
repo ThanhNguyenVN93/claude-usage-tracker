@@ -15,7 +15,7 @@ namespace ClaudeUsageTracker.Views
         private readonly Action _openSettings;
         private readonly AppConfig _config;
         private DateTime? _lastSnapshotAt;
-        private bool _restoringPosition;
+        private bool _hasSavedPosition;
 
         // Khi true, cho phép cửa sổ đóng thật (dùng lúc thoát hẳn ứng dụng).
         public bool AllowRealClose { get; set; }
@@ -57,11 +57,17 @@ namespace ClaudeUsageTracker.Views
             // Chiều cao tự co theo nội dung: giữ nguyên mép dưới để HUD không "nhảy" lên/xuống.
             SizeChanged += (s, e) =>
             {
-                if (_restoringPosition) return;
                 if (e.PreviousSize.Height > 0)
+                {
                     Top += e.PreviousSize.Height - e.NewSize.Height;
-                else
+                }
+                else if (!_hasSavedPosition)
+                {
+                    // Lần layout đầu tiên (PreviousSize = 0) mới được tự căn mép dưới.
+                    // Có vị trí người dùng đã lưu thì phải để yên, nếu không Top vừa khôi phục
+                    // sẽ bị ghi đè ngay và chỉ toạ độ X sống sót.
                     Top = ScreenPlacement.WorkAreaForCursor(this).Bottom - e.NewSize.Height - 16;
+                }
             };
 
             // Đừng để Alt+F4 / đóng cửa sổ hệ thống huỷ luôn instance — chỉ ẩn đi,
@@ -160,23 +166,19 @@ namespace ClaudeUsageTracker.Views
         // không còn (rút cáp, đổi cấu hình) thì quay về góc dưới phải của màn hình đang dùng.
         private void RestoreOrDefaultPosition()
         {
-            _restoringPosition = true;
-            try
+            if (!double.IsNaN(_config.HudLeft) && !double.IsNaN(_config.HudTop)
+                && ScreenPlacement.IsOnAnyScreen(_config.HudLeft, _config.HudTop, Width, 250))
             {
-                if (!double.IsNaN(_config.HudLeft) && !double.IsNaN(_config.HudTop)
-                    && ScreenPlacement.IsOnAnyScreen(_config.HudLeft, _config.HudTop, Width, 250))
-                {
-                    Left = _config.HudLeft;
-                    Top = _config.HudTop;
-                    return;
-                }
-
-                var workArea = ScreenPlacement.WorkAreaForCursor(this);
-                Left = workArea.Right - Width - 16;
-                // Chưa đo layout nên ước lượng chiều cao; SizeChanged sẽ tự căn lại mép dưới.
-                Top = workArea.Bottom - 250 - 16;
+                Left = _config.HudLeft;
+                Top = _config.HudTop;
+                _hasSavedPosition = true;
+                return;
             }
-            finally { _restoringPosition = false; }
+
+            var workArea = ScreenPlacement.WorkAreaForCursor(this);
+            Left = workArea.Right - Width - 16;
+            // Chưa đo layout nên ước lượng chiều cao; SizeChanged sẽ tự căn lại mép dưới.
+            Top = workArea.Bottom - 250 - 16;
         }
 
         private void RememberPosition()
@@ -185,6 +187,7 @@ namespace ClaudeUsageTracker.Views
             if (_config.HudLeft == Left && _config.HudTop == Top) return;
             _config.HudLeft = Left;
             _config.HudTop = Top;
+            _hasSavedPosition = true;
             ConfigService.Save(_config);
         }
 

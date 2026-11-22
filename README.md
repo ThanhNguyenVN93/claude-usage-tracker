@@ -49,14 +49,20 @@ Không cài cũng được — tool vẫn chạy bằng dữ liệu Claude Deskt
 
 ### 2. Build và chạy tool
 
+Cách dựng giống hệt bản phát hành trên GitHub (xem `.github/workflows/release.yml`):
+
 ```powershell
 cd csharp
-dotnet publish -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o ../bin
+dotnet publish ClaudeUsageTracker.csproj -c Release -r win-x64 --self-contained true -o <thu-muc-dich>
 ```
 
-Nên chép `bin\*` sang một thư mục cố định (ví dụ `%LOCALAPPDATA%\ClaudeUsageTracker\app`) rồi chạy từ đó, để việc build lại không làm hỏng bản đang tự khởi động cùng Windows. Bật "Khởi động cùng Windows" trong Cài đặt (ghi registry `HKCU\...\Run`, không cần admin).
+Chạy thẳng `run-csharp.bat` ở gốc repo cũng được — nó tự build nếu chưa có bản nào.
 
-> Không dùng `--self-contained` + single-file cho app WPF này: bản đó crash ngay khi mở.
+Nên publish vào một thư mục cố định ngoài repo (ví dụ `D:\ClaudeUsageTracker`) rồi chạy từ đó, để việc build lại không làm hỏng bản đang tự khởi động cùng Windows. Bật "Khởi động cùng Windows" trong Cài đặt (ghi registry `HKCU\...\Run`, không cần admin); app tự sửa đường dẫn trong registry mỗi lần chạy nếu bạn chuyển thư mục, nhưng không tự bật lại khi bạn đã tắt.
+
+> **Không thêm `-p:PublishSingleFile=true`.** Gói single-file cho WPF làm app chết ngay lúc khởi động với `BadImageFormatException: DirectWriteForwarder.dll` — DLL gốc không giải nén được từ bundle.
+
+> `SatelliteResourceLanguages=en` trong `.csproj` loại bỏ 13 thư mục bản địa hoá của .NET (~17 MB, 221 file) mà tool không dùng tới.
 
 ## Cấu trúc
 

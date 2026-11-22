@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Linq;
 using System.Windows;
@@ -50,20 +51,20 @@ namespace ClaudeUsageTracker.Views
 
             ChkAlerts.IsChecked = _config.EnableAlerts;
             TxtThresholds.Text = _config.AlertThresholds;
-            TxtContextWarn.Text = _config.ContextWarnPercent.ToString("0");
+            TxtContextWarn.Text = Num(_config.ContextWarnPercent, "0");
             ChkResetReminder.IsChecked = _config.EnableResetReminder;
             ChkUpdateCheck.IsChecked = _config.EnableUpdateCheck;
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
-            TxtDivergence.Text = _config.DivergenceThreshold.ToString("0.#");
+            TxtDivergence.Text = Num(_config.DivergenceThreshold, "0.#");
 
             _pendingMod = _config.HotkeyModifiers;
             _pendingVk  = _config.HotkeyVirtualKey;
             TxtHotkey.Text = FormatHotkey(_pendingMod, _pendingVk);
 
             ChkAutoModel.IsChecked = _config.EnableAutoModel;
-            TxtSonnetAt.Text = _config.AutoModelSonnetAt.ToString("0");
-            TxtHaikuAt.Text = _config.AutoModelHaikuAt.ToString("0");
+            TxtSonnetAt.Text = Num(_config.AutoModelSonnetAt, "0");
+            TxtHaikuAt.Text = Num(_config.AutoModelHaikuAt, "0");
 
             _pendingStatsMod = _config.StatsHotkeyModifiers;
             _pendingStatsVk  = _config.StatsHotkeyVirtualKey;
@@ -88,23 +89,25 @@ namespace ClaudeUsageTracker.Views
 
         private void BtnSave_Click(object sender, RoutedEventArgs e)
         {
+            // Giá trị sai trước đây bị bỏ qua không một lời nào: hộp thoại đóng lại,
+            // người dùng tưởng đã lưu còn thiết lập thì vẫn như cũ.
+            var rejected = new List<string>();
             // SessionKey — chỉ ghi nếu hợp lệ hoặc xoá
             string newKey = PwdSessionKey.Password.Trim();
             if (newKey.StartsWith("sk-ant-") || string.IsNullOrEmpty(newKey))
                 _config.SessionKey = newKey;
 
-            if (int.TryParse(TxtApiSyncInterval.Text, out int apiInterval) && apiInterval >= 0)
+            if (TryParseInt(TxtApiSyncInterval.Text, out int apiInterval) && apiInterval >= 0)
                 _config.ApiSyncIntervalSeconds = apiInterval;
+            else rejected.Add("Chu kỳ sync API (giây, >= 0)");
 
-            if (int.TryParse(TxtInterval.Text, out int interval) && interval > 0)
-            {
+            if (TryParseInt(TxtInterval.Text, out int interval) && interval > 0)
                 _config.CheckIntervalSeconds = interval;
-            }
+            else rejected.Add("Chu kỳ kiểm tra (giây, > 0)");
 
-            if (int.TryParse(TxtStaleMinutes.Text, out int staleMinutes) && staleMinutes > 0)
-            {
+            if (TryParseInt(TxtStaleMinutes.Text, out int staleMinutes) && staleMinutes > 0)
                 _config.StaleThresholdMinutes = staleMinutes;
-            }
+            else rejected.Add("Ngưỡng dữ liệu cũ (phút, > 0)");
 
             AutoStartService.SetEnabled(ChkAutoStart.IsChecked == true);
 
@@ -112,36 +115,34 @@ namespace ClaudeUsageTracker.Views
 
             // Chỉ nhận danh sách ngưỡng hợp lệ (số nguyên 1–100), sai thì giữ giá trị cũ.
             var parsed = TxtThresholds.Text.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .Select(t => int.TryParse(t, out int v) ? v : -1)
+                .Select(t => TryParseInt(t, out int v) ? v : -1)
                 .ToList();
             if (parsed.Count > 0 && parsed.All(v => v is > 0 and <= 100))
-            {
                 _config.AlertThresholds = string.Join(",", parsed.Distinct().OrderBy(v => v));
-            }
+            else rejected.Add("Ngưỡng cảnh báo % (danh sách 1–100)");
 
-            if (double.TryParse(TxtContextWarn.Text, out double ctxWarn) && ctxWarn is > 0 and <= 100)
-            {
+            if (TryParseNumber(TxtContextWarn.Text, out double ctxWarn) && ctxWarn is > 0 and <= 100)
                 _config.ContextWarnPercent = ctxWarn;
-            }
+            else rejected.Add("Ngưỡng cảnh báo ngữ cảnh (1–100)");
 
             _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
             _config.EnableUpdateCheck = ChkUpdateCheck.IsChecked == true;
             _config.EnableEstimate = ChkEstimate.IsChecked == true;
 
-            if (double.TryParse(TxtDivergence.Text, out double divergence) && divergence is > 0 and <= 100)
-            {
+            if (TryParseNumber(TxtDivergence.Text, out double divergence) && divergence is > 0 and <= 100)
                 _config.DivergenceThreshold = divergence;
-            }
+            else rejected.Add("Ngưỡng lệch 2 nguồn (1–100)");
 
             _config.EnableAutoModel = ChkAutoModel.IsChecked == true;
 
             // Ngưỡng Haiku phải cao hơn ngưỡng Sonnet, nếu không thì giữ giá trị cũ.
-            if (double.TryParse(TxtSonnetAt.Text, out double sonnetAt) && double.TryParse(TxtHaikuAt.Text, out double haikuAt)
+            if (TryParseNumber(TxtSonnetAt.Text, out double sonnetAt) && TryParseNumber(TxtHaikuAt.Text, out double haikuAt)
                 && sonnetAt is > 0 and < 100 && haikuAt is > 0 and <= 100 && haikuAt > sonnetAt)
             {
                 _config.AutoModelSonnetAt = sonnetAt;
                 _config.AutoModelHaikuAt = haikuAt;
             }
+            else rejected.Add("Ngưỡng tự đổi model (Haiku phải lớn hơn Sonnet)");
 
             if (_pendingMod != 0 && _pendingVk != 0)
             {
@@ -168,9 +169,33 @@ namespace ClaudeUsageTracker.Views
             }
             _config.WebhookUrl = webhook;
 
+            if (rejected.Count > 0)
+            {
+                System.Windows.MessageBox.Show(
+                    "Cac muc sau khong hop le nen giu nguyen gia tri cu:\n\n- " +
+                    string.Join("\n- ", rejected) +
+                    "\n\nSo thap phan dung dau cham hay dau phay deu duoc (vi du 4.5).",
+                    "Mot so thiet lap chua duoc luu", MessageBoxButton.OK, MessageBoxImage.Warning);
+            }
+
             DialogResult = true;
             Close();
         }
+
+        // Trên máy dùng dấu phẩy thập phân (vi-VN, de-DE...), double.TryParse theo culture
+        // đọc "4.5" thành 45 — sai 10 lần mà vẫn lọt kiểm tra 0..100. Nhận cả hai kiểu dấu.
+        private static bool TryParseNumber(string text, out double value)
+        {
+            text = text.Trim();
+            if (double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out value)) return true;
+            return double.TryParse(text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out value);
+        }
+
+        private static bool TryParseInt(string text, out int value) =>
+            int.TryParse(text.Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
+
+        // Hiển thị cố định bằng dấu chấm để khớp với cách đọc ở trên.
+        private static string Num(double v, string fmt) => v.ToString(fmt, CultureInfo.InvariantCulture);
 
         private static bool IsHttpsUrl(string url) =>
             Uri.TryCreate(url, UriKind.Absolute, out var uri) && uri.Scheme == Uri.UriSchemeHttps;

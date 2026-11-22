@@ -51,10 +51,15 @@ jobs:
       - name: Rename exe + zip
         shell: pwsh
         run: |
-          # Đổi tên exe về tên cố định
-          $exe = Get-ChildItem "csharp\publish\*.exe" | Select-Object -First 1
+          # Publish ra NHIEU .exe (ClaudeUsageTracker.exe + createdump.exe cua .NET).
+          # Truoc day lay "Select-Object -First 1" tuc la lay theo thu tu chu cai, va so sanh
+          # duong dan tuyet doi voi tuong doi nen luon khac nhau -> chay Move-Item moi lan.
+          # Hien tai dung do may (Cl < cr); doi ten san pham la dong goi nham createdump.exe.
           $dest = "csharp\publish\ClaudeUsageTracker.exe"
-          if ($exe.FullName -ne $dest) { Move-Item $exe.FullName $dest -Force }
+          if (-not (Test-Path $dest)) {
+            Write-Error "Khong tim thay $dest trong ban publish"
+            exit 1
+          }
           # Xoá pdb — không cần cho runtime
           Remove-Item "csharp\publish\*.pdb" -Force -ErrorAction SilentlyContinue
           # Tên zip phải khớp ZipRx trong UpdateService.cs: ClaudeUsageTracker-v{ver}-win-x64.zip
