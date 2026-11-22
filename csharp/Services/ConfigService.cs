@@ -41,6 +41,11 @@ namespace ClaudeUsageTracker.Services
         public bool PrivacyMode { get; set; } = false;
         // Độ mờ của HUD (0.65 - 1.0)
         public double HudOpacity { get; set; } = 1.0;
+        // Hotkey lệnh nhanh /model haiku và /compact qua Terminal. Mặc định Ctrl+Shift+H / Ctrl+Shift+C.
+        public uint QuickHaikuModifiers { get; set; } = 0x0006;
+        public uint QuickHaikuVirtualKey { get; set; } = 0x48;
+        public uint QuickCompactModifiers { get; set; } = 0x0006;
+        public uint QuickCompactVirtualKey { get; set; } = 0x43;
     }
 
     public static class ConfigService
