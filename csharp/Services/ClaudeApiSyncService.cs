@@ -261,6 +261,7 @@ namespace ClaudeUsageTracker.Services
                         foreach (var prop in doc.RootElement.EnumerateObject())
                         {
                             // Giữ lại những field không phải usage numbers
+                            // sevenDayResetsAt / costUsd do statusline ghi, API không có -> phải giữ.
                             if (prop.Name is "fiveHour" or "sevenDay" or "t" or "fiveHourResetsAt")
                                 continue;
                             existing[prop.Name] = prop.Value.Clone();

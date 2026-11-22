@@ -129,7 +129,7 @@ namespace ClaudeUsageTracker
 
             _lastUsage = await FetchUsageAsync();
             if (_isExiting) return;
-            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, OpenSettings);
+            _hud = new MiniHudWindow(_lastUsage, FetchUsageAsync, OpenStats, OpenSettings, _config);
             // Chưa gọi Show() — ForegroundAppWatcherService hoặc click tray sẽ quyết định khi nào hiện.
             UpdateTrayTooltip(_lastUsage);
 

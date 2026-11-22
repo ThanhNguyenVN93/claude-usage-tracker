@@ -58,6 +58,7 @@
                 <StackPanel Margin="0,10,0,0">
                     <TextBlock x:Name="TxtMessages" Text="• Đã dùng: 25 / 45 tin nhắn" FontSize="11" Foreground="#CDD6F4" Margin="0,1" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtCountdown" Text="• Đếm ngược reset: sau 2h 45m" FontSize="11" Foreground="#CDD6F4" Margin="0,1" TextWrapping="Wrap"/>
+                    <TextBlock x:Name="TxtWeekly" Text="" FontSize="11" Foreground="#CDD6F4" Margin="0,1" Visibility="Collapsed" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtExtraUsage" Text="• Dùng thêm (overage): 0%" FontSize="11" Foreground="#FAB387" Margin="0,1" Visibility="Collapsed" TextWrapping="Wrap"/>
                     <TextBlock x:Name="TxtInsight" Text="" FontSize="11" Foreground="#A6ADC8" Margin="0,3,0,0"
                                TextWrapping="Wrap" Visibility="Collapsed"/>

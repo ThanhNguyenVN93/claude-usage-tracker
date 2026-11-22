@@ -36,6 +36,10 @@ namespace ClaudeUsageTracker.Models
         public AlertLevel ConditionLevel { get; set; } = AlertLevel.None;
         // Model đang dùng (chỉ có khi đọc từ CLI statusline).
         public string? ModelName { get; set; }
+        // Mốc reset hạn ngạch tuần (statusline ghi sẵn nhưng trước đây không ai đọc).
+        public DateTime? WeeklyResetTime { get; set; }
+        // Tổng chi phí phiên CLI (USD) — cũng do statusline ghi sẵn.
+        public double? SessionCostUsd { get; set; }
 
         public string StatusColorHex
         {

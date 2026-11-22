@@ -43,7 +43,7 @@ namespace ClaudeUsageTracker.Views
             Loaded += (s, e) =>
             {
                 UpdateLayout();   // ActualHeight có thể còn 0 nếu chưa arrange
-                var work = SystemParameters.WorkArea;
+                var work = ScreenPlacement.WorkAreaForCursor(this);
                 Left = Math.Max(work.Left, work.Right - 16 - 340 - Width - 4);
                 Top = work.Bottom - ActualHeight - 16;
                 ((Storyboard)FindResource("FadeIn")).Begin(this);
@@ -51,18 +51,11 @@ namespace ClaudeUsageTracker.Views
                 DrawTimeline();
             };
 
-            // Giống toast: tự đóng khi người dùng bấm sang chỗ khác. Phải chặn gọi Close() lần hai:
-            // bấm ✕ cũng làm cửa sổ mất focus ngay trong lúc đang đóng, và Close() lúc đó sẽ ném
-            // InvalidOperationException (đã từng làm sập cả tool).
-            bool closing = false;
-            Closing += (s, e) => closing = true;
-            Deactivated += (s, e) =>
+            // Trước đây cửa sổ tự đóng khi mất focus: alt-tab đi tra cứu một thứ rồi quay lại
+            // là bảng thống kê biến mất, phải mở lại từ đầu. Giờ chỉ đóng khi người dùng bảo đóng.
+            PreviewKeyDown += (s, e) =>
             {
-                if (closing) return;
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    if (!closing && IsLoaded) Close();
-                }));
+                if (e.Key == Key.Escape) { e.Handled = true; Close(); }
             };
         }
 

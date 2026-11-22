@@ -163,6 +163,11 @@ namespace ClaudeUsageTracker.Services
             string? sessionId = root.TryGetProperty("sessionId", out var sidEl) && sidEl.ValueKind == JsonValueKind.String
                 ? sidEl.GetString() : null;
 
+            DateTime? weeklyReset = root.TryGetProperty("sevenDayResetsAt", out var wrEl) && wrEl.ValueKind == JsonValueKind.Number
+                ? DateTimeOffset.FromUnixTimeSeconds(wrEl.GetInt64()).LocalDateTime : (DateTime?)null;
+            double? costUsd = root.TryGetProperty("costUsd", out var costEl) && costEl.ValueKind == JsonValueKind.Number
+                ? costEl.GetDouble() : (double?)null;
+
             return new UsageInfo
             {
                 SourceLabel = "CLI",
@@ -182,6 +187,8 @@ namespace ClaudeUsageTracker.Services
                 ContextPercent = contextPercent,
                 SessionId = sessionId,
                 ModelName = modelName,
+                WeeklyResetTime = weeklyReset,
+                SessionCostUsd = costUsd,
                 Note = note
             };
         }

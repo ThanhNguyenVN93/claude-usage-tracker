@@ -101,7 +101,7 @@ namespace ClaudeUsageTracker.Views
 
         private void PositionTopRight()
         {
-            var area = SystemParameters.WorkArea;
+            var area = ScreenPlacement.WorkAreaForCursor(this);
             Left = area.Right - ActualWidth - 16;
             Top  = area.Top  + 16;
         }

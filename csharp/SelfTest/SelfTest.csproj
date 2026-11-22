@@ -20,6 +20,8 @@
     <Compile Include="..\Services\ClaudeSettingsFile.cs" />
     <Compile Include="..\Services\ModelSwitchService.cs" />
     <Compile Include="..\Services\ConfigService.cs" />
+    <Compile Include="..\Services\ProcessUtil.cs" />
+    <Compile Include="..\Services\ClaudeUsageService.cs" />
     <Compile Include="..\Models\UsageInfo.cs" />
   </ItemGroup>
 

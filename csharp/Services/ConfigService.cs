@@ -32,6 +32,9 @@ namespace ClaudeUsageTracker.Services
         public uint StatsHotkeyVirtualKey { get; set; } = 0x53;
         // Webhook URL để gửi cảnh báo usage (Discord, Slack, generic)
         public string WebhookUrl { get; set; } = string.Empty;
+        // Vị trí HUD người dùng đã kéo tới (NaN = chưa đặt, dùng góc dưới phải mặc định)
+        public double HudLeft { get; set; } = double.NaN;
+        public double HudTop { get; set; } = double.NaN;
     }
 
     public static class ConfigService

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Animation;
@@ -9,6 +10,11 @@ namespace ClaudeUsageTracker.Views
     public partial class ToastWindow : Window
     {
         private static ToastWindow? _current;
+
+        // Nhiều cảnh báo nổ liên tiếp (vượt mốc 5h + vượt mốc tuần + ngữ cảnh phình) thì
+        // trước đây cái sau đè cái trước ngay lập tức, người dùng không kịp đọc. Xếp hàng thay vì đè.
+        private static readonly Queue<(string title, string body, string icon, Action? onAction)> Pending = new();
+        private const int MaxPending = 5;
 
         private readonly DispatcherTimer _timer;
         private double _remaining;
@@ -48,14 +54,31 @@ namespace ClaudeUsageTracker.Views
             };
         }
 
-        public static ToastWindow ShowToast(string title, string body, string icon = "🔔", Action? onAction = null)
+        public static void ShowToast(string title, string body, string icon = "🔔", Action? onAction = null)
         {
-            _current?.Dismiss();
+            if (_current != null)
+            {
+                // Hàng đợi có trần: cảnh báo cũ nhất bị bỏ chứ không dồn vô hạn.
+                if (Pending.Count >= MaxPending) Pending.Dequeue();
+                Pending.Enqueue((title, body, icon, onAction));
+                return;
+            }
+            Display(title, body, icon, onAction);
+        }
+
+        private static void Display(string title, string body, string icon, Action? onAction)
+        {
             var t = new ToastWindow(icon, title, body);
             if (onAction != null) t.ActionClicked += onAction;
             _current = t;
             t.Show();
-            return t;
+        }
+
+        private static void ShowNextPending()
+        {
+            if (_current != null || Pending.Count == 0) return;
+            var next = Pending.Dequeue();
+            Display(next.title, next.body, next.icon, next.onAction);
         }
 
         private void OnTick(object? sender, EventArgs e)
@@ -74,7 +97,6 @@ namespace ClaudeUsageTracker.Views
             if (_dismissed) return;
             _dismissed = true;
             _timer.Stop();
-            if (_current == this) _current = null;
             try
             {
                 var sb = (Storyboard)FindResource("FadeOut");
@@ -93,13 +115,17 @@ namespace ClaudeUsageTracker.Views
             _timer.Stop();
             _timer.Tick -= OnTick;
             ActionClicked = null;
-            if (_current == this) _current = null;
+            if (_current == this)
+            {
+                _current = null;
+                ShowNextPending();
+            }
             base.OnClosed(e);
         }
 
         private void PositionBottomRight()
         {
-            var area = SystemParameters.WorkArea;
+            var area = ScreenPlacement.WorkAreaForCursor(this);
             Left = area.Right  - ActualWidth  - 16;
             Top  = area.Bottom - ActualHeight - 16;
         }

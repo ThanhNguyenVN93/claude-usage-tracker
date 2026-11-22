@@ -12,6 +12,24 @@ const os = require('os');
 const path = require('path');
 
 const HISTORY_MIN_GAP_MS = 60 * 1000;
+// App tray moi don cli-history.jsonl, va chi don mot lan luc khoi dong. Dung CLI nhieu
+// ngay ma khong mo tray thi file phinh mai, nen tu cat ngay tai day.
+const HISTORY_MAX_BYTES = 2 * 1024 * 1024;
+const HISTORY_KEEP_LINES = 5000;
+
+// Chi doc lai toan bo file khi no da thuc su lon, de moi lan render khong ton them IO.
+function trimHistory(file) {
+  try {
+    if (fs.statSync(file).size <= HISTORY_MAX_BYTES) return;
+    const lines = fs.readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    if (lines.length <= HISTORY_KEEP_LINES) return;
+    const tmp = file + '.tmp';
+    fs.writeFileSync(tmp, lines.slice(-HISTORY_KEEP_LINES).join('\n') + '\n');
+    fs.renameSync(tmp, file);
+  } catch (e) {
+    // cat bot that bai khong duoc lam hong statusline
+  }
+}
 
 let input = '';
 process.stdin.on('data', (chunk) => { input += chunk; });
@@ -88,6 +106,7 @@ process.stdin.on('end', () => {
           sid: payload.sessionId,
         });
         fs.appendFileSync(historyFile, line + '\n');
+        trimHistory(historyFile);
       }
     }
   } catch (e) {

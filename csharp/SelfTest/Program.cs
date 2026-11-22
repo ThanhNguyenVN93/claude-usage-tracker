@@ -479,6 +479,55 @@ Console.WriteLine("HistoryService");
     Directory.Delete(dir, true);
 }
 
+
+// ===== ClaudeUsageService: đọc cli-usage.json =====
+Console.WriteLine("ClaudeUsageService");
+{
+    string dir = Path.Combine(Path.GetTempPath(), "cut-usage-" + Guid.NewGuid().ToString("N"));
+    Directory.CreateDirectory(dir);
+    string prev = Environment.GetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR") ?? "";
+    string prevDesktop = Environment.GetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY") ?? "";
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR", dir);
+    // trỏ nguồn Desktop vào file không tồn tại để chỉ kiểm nhánh CLI
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY", Path.Combine(dir, "khong-co.json"));
+
+    long NowMs() => DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+    long Secs(DateTime t) => new DateTimeOffset(t.ToUniversalTime()).ToUnixTimeSeconds();
+
+    var svc = new ClaudeUsageService();
+    var cfg = new AppConfig { StaleThresholdMinutes = 60 };
+    var fhReset = DateTime.Now.AddHours(3);
+    var sdReset = DateTime.Now.AddDays(2);
+
+    File.WriteAllText(Path.Combine(dir, "cli-usage.json"),
+        "{" +
+        $"\"t\":{NowMs()}," +
+        "\"fiveHour\":41,\"sevenDay\":13," +
+        $"\"fiveHourResetsAt\":{Secs(fhReset)}," +
+        $"\"sevenDayResetsAt\":{Secs(sdReset)}," +
+        "\"costUsd\":1.25,\"model\":\"Opus 5\",\"sessionId\":\"s9\",\"contextPercent\":33}");
+
+    var info = svc.GetUsageAsync(cfg).GetAwaiter().GetResult();
+    Check("đọc được % từ CLI", info.PercentUsed == 41 && info.WeeklyPercent == 13, $"(got {info.PercentUsed}/{info.WeeklyPercent})");
+    Check("đọc sevenDayResetsAt (trước đây bị bỏ không dùng)",
+        info.WeeklyResetTime.HasValue && Math.Abs((info.WeeklyResetTime.Value - sdReset).TotalSeconds) < 2,
+        $"(got {info.WeeklyResetTime})");
+    Check("đọc costUsd (trước đây bị bỏ không dùng)", info.SessionCostUsd == 1.25, $"(got {info.SessionCostUsd})");
+    Check("giờ reset 5h đúng", Math.Abs((info.ResetTime - fhReset).TotalSeconds) < 2, $"(got {info.ResetTime})");
+
+    // Không có nguồn nào: ResetTime phải là default chứ không phải Now (nếu không đồng hồ
+    // đếm ngược hiện "đã reset" ngay khi mở).
+    File.Delete(Path.Combine(dir, "cli-usage.json"));
+    var empty = svc.GetUsageAsync(cfg).GetAwaiter().GetResult();
+    Check("không có dữ liệu: IsDemo và ResetTime = default", empty.IsDemo && empty.ResetTime == default,
+        $"(demo={empty.IsDemo} reset={empty.ResetTime})");
+    Check("không có dữ liệu: % = 0 chứ không phải số demo 42", empty.PercentUsed == 0, $"(got {empty.PercentUsed})");
+
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DIR", prev.Length == 0 ? null : prev);
+    Environment.SetEnvironmentVariable("CLAUDE_USAGE_TRACKER_DESKTOP_HISTORY", prevDesktop.Length == 0 ? null : prevDesktop);
+    Directory.Delete(dir, true);
+}
+
 Console.WriteLine();
 Console.WriteLine($"Kết quả: {passed} pass, {failed} fail");
 return failed == 0 ? 0 : 1;

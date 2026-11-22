@@ -13,7 +13,9 @@ namespace ClaudeUsageTracker.Views
         private readonly Func<Task<UsageInfo>> _fetch;
         private readonly Action _openStats;
         private readonly Action _openSettings;
+        private readonly AppConfig _config;
         private DateTime? _lastSnapshotAt;
+        private bool _restoringPosition;
 
         // Khi true, cho phép cửa sổ đóng thật (dùng lúc thoát hẳn ứng dụng).
         public bool AllowRealClose { get; set; }
@@ -41,23 +43,25 @@ namespace ClaudeUsageTracker.Views
             Hide();
         }
 
-        public MiniHudWindow(UsageInfo info, Func<Task<UsageInfo>> fetch, Action openStats, Action openSettings)
+        public MiniHudWindow(UsageInfo info, Func<Task<UsageInfo>> fetch, Action openStats, Action openSettings, AppConfig config)
         {
             InitializeComponent();
             _fetch = fetch;
             _openStats = openStats;
             _openSettings = openSettings;
+            _config = config;
 
             ApplyData(info);
-            PositionAtBottomRight();
+            RestoreOrDefaultPosition();
 
             // Chiều cao tự co theo nội dung: giữ nguyên mép dưới để HUD không "nhảy" lên/xuống.
             SizeChanged += (s, e) =>
             {
+                if (_restoringPosition) return;
                 if (e.PreviousSize.Height > 0)
                     Top += e.PreviousSize.Height - e.NewSize.Height;
                 else
-                    Top = SystemParameters.WorkArea.Bottom - e.NewSize.Height - 16;
+                    Top = ScreenPlacement.WorkAreaForCursor(this).Bottom - e.NewSize.Height - 16;
             };
 
             // Đừng để Alt+F4 / đóng cửa sổ hệ thống huỷ luôn instance — chỉ ẩn đi,
@@ -94,6 +98,21 @@ namespace ClaudeUsageTracker.Views
 
             TxtMessages.Text = $"• Đã dùng: {info.MessagesRemaining}";
             TxtCountdown.Text = $"• Reset chu kỳ 5h: {info.ResetCountdown}";
+
+            var extraLines = new System.Collections.Generic.List<string>();
+            if (info.WeeklyResetTime is DateTime wr && wr > DateTime.Now)
+                extraLines.Add($"• Reset tuần: {StatsService.Fmt(wr - DateTime.Now)} nữa (lúc {wr:HH:mm dd/MM})");
+            if (info.SessionCostUsd is double cost && cost > 0)
+                extraLines.Add($"• Chi phí phiên: ${cost:0.00}");
+            if (extraLines.Count > 0)
+            {
+                TxtWeekly.Text = string.Join(Environment.NewLine, extraLines);
+                TxtWeekly.Visibility = Visibility.Visible;
+            }
+            else
+            {
+                TxtWeekly.Visibility = Visibility.Collapsed;
+            }
 
             if (info.ExtraUsagePercent.HasValue)
             {
@@ -137,12 +156,36 @@ namespace ClaudeUsageTracker.Views
             }
         }
 
-        private void PositionAtBottomRight()
+        // Vị trí người dùng đã kéo tới được giữ lại qua các lần khởi động; nếu màn hình đó
+        // không còn (rút cáp, đổi cấu hình) thì quay về góc dưới phải của màn hình đang dùng.
+        private void RestoreOrDefaultPosition()
         {
-            var workArea = SystemParameters.WorkArea;
-            Left = workArea.Right - Width - 16;
-            // Chưa đo layout nên ước lượng chiều cao; SizeChanged sẽ tự căn lại mép dưới.
-            Top = workArea.Bottom - 250 - 16;
+            _restoringPosition = true;
+            try
+            {
+                if (!double.IsNaN(_config.HudLeft) && !double.IsNaN(_config.HudTop)
+                    && ScreenPlacement.IsOnAnyScreen(_config.HudLeft, _config.HudTop, Width, 250))
+                {
+                    Left = _config.HudLeft;
+                    Top = _config.HudTop;
+                    return;
+                }
+
+                var workArea = ScreenPlacement.WorkAreaForCursor(this);
+                Left = workArea.Right - Width - 16;
+                // Chưa đo layout nên ước lượng chiều cao; SizeChanged sẽ tự căn lại mép dưới.
+                Top = workArea.Bottom - 250 - 16;
+            }
+            finally { _restoringPosition = false; }
+        }
+
+        private void RememberPosition()
+        {
+            if (double.IsNaN(Left) || double.IsNaN(Top)) return;
+            if (_config.HudLeft == Left && _config.HudTop == Top) return;
+            _config.HudLeft = Left;
+            _config.HudTop = Top;
+            ConfigService.Save(_config);
         }
 
         private void TitleBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -150,6 +193,7 @@ namespace ClaudeUsageTracker.Views
             if (e.ButtonState == MouseButtonState.Pressed)
             {
                 DragMove();
+                RememberPosition();   // DragMove chặn cho tới khi thả chuột
             }
         }
 
