@@ -21,6 +21,12 @@ namespace ClaudeUsageTracker.Views
         private uint _pendingStatsMod;
         private uint _pendingStatsVk;
         private bool _statsHotkeyCapturing;
+        private uint _pendingQuickHaikuMod;
+        private uint _pendingQuickHaikuVk;
+        private bool _quickHaikuHotkeyCapturing;
+        private uint _pendingQuickCompactMod;
+        private uint _pendingQuickCompactVk;
+        private bool _quickCompactHotkeyCapturing;
 
         public SettingsWindow(AppConfig config)
         {
@@ -55,6 +61,7 @@ namespace ClaudeUsageTracker.Views
             ChkResetReminder.IsChecked = _config.EnableResetReminder;
             ChkSoundAlert.IsChecked = _config.EnableSoundAlert;
             ChkUpdateCheck.IsChecked = _config.EnableUpdateCheck;
+            ChkAutoPrivacy.IsChecked = _config.AutoPrivacyEnabled;
             TxtHudOpacity.Text = Num(Math.Round(_config.HudOpacity * 100), "0");
 
             ChkEstimate.IsChecked = _config.EnableEstimate;
@@ -71,6 +78,14 @@ namespace ClaudeUsageTracker.Views
             _pendingStatsMod = _config.StatsHotkeyModifiers;
             _pendingStatsVk  = _config.StatsHotkeyVirtualKey;
             TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
+
+            _pendingQuickHaikuMod = _config.QuickHaikuModifiers;
+            _pendingQuickHaikuVk  = _config.QuickHaikuVirtualKey;
+            TxtQuickHaikuHotkey.Text = FormatHotkey(_pendingQuickHaikuMod, _pendingQuickHaikuVk);
+
+            _pendingQuickCompactMod = _config.QuickCompactModifiers;
+            _pendingQuickCompactVk  = _config.QuickCompactVirtualKey;
+            TxtQuickCompactHotkey.Text = FormatHotkey(_pendingQuickCompactMod, _pendingQuickCompactVk);
 
             TxtWebhookUrl.Text = _config.WebhookUrl;
 
@@ -130,6 +145,7 @@ namespace ClaudeUsageTracker.Views
             _config.EnableResetReminder = ChkResetReminder.IsChecked == true;
             _config.EnableSoundAlert = ChkSoundAlert.IsChecked == true;
             _config.EnableUpdateCheck = ChkUpdateCheck.IsChecked == true;
+            _config.AutoPrivacyEnabled = ChkAutoPrivacy.IsChecked == true;
             if (TryParseInt(TxtHudOpacity.Text, out int opacityPct) && opacityPct is >= 50 and <= 100)
                 _config.HudOpacity = opacityPct / 100.0;
             else rejected.Add("Độ rõ cửa sổ HUD (50–100%)");
@@ -160,6 +176,18 @@ namespace ClaudeUsageTracker.Views
             {
                 _config.StatsHotkeyModifiers  = _pendingStatsMod;
                 _config.StatsHotkeyVirtualKey = _pendingStatsVk;
+            }
+
+            if (_pendingQuickHaikuMod != 0 && _pendingQuickHaikuVk != 0)
+            {
+                _config.QuickHaikuModifiers  = _pendingQuickHaikuMod;
+                _config.QuickHaikuVirtualKey = _pendingQuickHaikuVk;
+            }
+
+            if (_pendingQuickCompactMod != 0 && _pendingQuickCompactVk != 0)
+            {
+                _config.QuickCompactModifiers  = _pendingQuickCompactMod;
+                _config.QuickCompactVirtualKey = _pendingQuickCompactVk;
             }
 
             // Chặn ngay tại đây và nói rõ lý do: App chỉ POST qua https, nếu lặng lẽ bỏ
@@ -335,6 +363,122 @@ namespace ClaudeUsageTracker.Views
             _pendingStatsMod = 0x0006; // Ctrl+Shift
             _pendingStatsVk  = 0x53;   // S
             TxtStatsHotkey.Text = FormatHotkey(_pendingStatsMod, _pendingStatsVk);
+        }
+
+        // ── Quick Haiku hotkey capture ───────────────────────────────────────
+
+        private void TxtQuickHaikuHotkey_GotFocus(object sender, RoutedEventArgs e)
+        {
+            _quickHaikuHotkeyCapturing = true;
+            TxtQuickHaikuHotkey.Text = "Bấm tổ hợp phím…";
+            TxtQuickHaikuHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xC2, 0xE7));
+        }
+
+        private void TxtQuickHaikuHotkey_LostFocus(object sender, RoutedEventArgs e)
+        {
+            _quickHaikuHotkeyCapturing = false;
+            TxtQuickHaikuHotkey.Text = FormatHotkey(_pendingQuickHaikuMod, _pendingQuickHaikuVk);
+            TxtQuickHaikuHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+        }
+
+        private void TxtQuickHaikuHotkey_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (!_quickHaikuHotkeyCapturing) return;
+            e.Handled = true;
+
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key == Key.Escape)
+            {
+                TxtQuickHaikuHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                return;
+            }
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                     or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin or Key.System)
+                return;
+
+            var mods = Keyboard.Modifiers;
+            if ((mods & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+            {
+                TxtQuickHaikuHotkey.Text = "Cần Ctrl / Alt / Win!";
+                return;
+            }
+
+            uint win32Mod = 0;
+            if ((mods & ModifierKeys.Control) != 0) win32Mod |= 0x0002;
+            if ((mods & ModifierKeys.Shift)   != 0) win32Mod |= 0x0004;
+            if ((mods & ModifierKeys.Alt)     != 0) win32Mod |= 0x0001;
+            if ((mods & ModifierKeys.Windows) != 0) win32Mod |= 0x0008;
+
+            _pendingQuickHaikuMod = win32Mod;
+            _pendingQuickHaikuVk  = (uint)KeyInterop.VirtualKeyFromKey(key);
+            TxtQuickHaikuHotkey.Text = FormatHotkey(win32Mod, _pendingQuickHaikuVk);
+            TxtQuickHaikuHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+            TxtQuickHaikuHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+        }
+
+        private void BtnResetQuickHaikuHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            _pendingQuickHaikuMod = 0x0006; // Ctrl+Shift
+            _pendingQuickHaikuVk  = 0x48;   // H
+            TxtQuickHaikuHotkey.Text = FormatHotkey(_pendingQuickHaikuMod, _pendingQuickHaikuVk);
+        }
+
+        // ── Quick Compact hotkey capture ─────────────────────────────────────
+
+        private void TxtQuickCompactHotkey_GotFocus(object sender, RoutedEventArgs e)
+        {
+            _quickCompactHotkeyCapturing = true;
+            TxtQuickCompactHotkey.Text = "Bấm tổ hợp phím…";
+            TxtQuickCompactHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xF5, 0xC2, 0xE7));
+        }
+
+        private void TxtQuickCompactHotkey_LostFocus(object sender, RoutedEventArgs e)
+        {
+            _quickCompactHotkeyCapturing = false;
+            TxtQuickCompactHotkey.Text = FormatHotkey(_pendingQuickCompactMod, _pendingQuickCompactVk);
+            TxtQuickCompactHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+        }
+
+        private void TxtQuickCompactHotkey_PreviewKeyDown(object sender, System.Windows.Input.KeyEventArgs e)
+        {
+            if (!_quickCompactHotkeyCapturing) return;
+            e.Handled = true;
+
+            var key = e.Key == Key.System ? e.SystemKey : e.Key;
+            if (key == Key.Escape)
+            {
+                TxtQuickCompactHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+                return;
+            }
+            if (key is Key.LeftCtrl or Key.RightCtrl or Key.LeftShift or Key.RightShift
+                     or Key.LeftAlt or Key.RightAlt or Key.LWin or Key.RWin or Key.System)
+                return;
+
+            var mods = Keyboard.Modifiers;
+            if ((mods & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Windows)) == 0)
+            {
+                TxtQuickCompactHotkey.Text = "Cần Ctrl / Alt / Win!";
+                return;
+            }
+
+            uint win32Mod = 0;
+            if ((mods & ModifierKeys.Control) != 0) win32Mod |= 0x0002;
+            if ((mods & ModifierKeys.Shift)   != 0) win32Mod |= 0x0004;
+            if ((mods & ModifierKeys.Alt)     != 0) win32Mod |= 0x0001;
+            if ((mods & ModifierKeys.Windows) != 0) win32Mod |= 0x0008;
+
+            _pendingQuickCompactMod = win32Mod;
+            _pendingQuickCompactVk  = (uint)KeyInterop.VirtualKeyFromKey(key);
+            TxtQuickCompactHotkey.Text = FormatHotkey(win32Mod, _pendingQuickCompactVk);
+            TxtQuickCompactHotkey.Foreground = new SolidColorBrush(System.Windows.Media.Color.FromRgb(0xA6, 0xE3, 0xA1));
+            TxtQuickCompactHotkey.MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
+        }
+
+        private void BtnResetQuickCompactHotkey_Click(object sender, RoutedEventArgs e)
+        {
+            _pendingQuickCompactMod = 0x0006; // Ctrl+Shift
+            _pendingQuickCompactVk  = 0x43;   // C
+            TxtQuickCompactHotkey.Text = FormatHotkey(_pendingQuickCompactMod, _pendingQuickCompactVk);
         }
 
         private void BtnRestoreBackup_Click(object sender, RoutedEventArgs e)

@@ -22,6 +22,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="4"/>
             </Grid.RowDefinitions>
 
@@ -41,8 +42,12 @@
             <TextBlock x:Name="TxtBody" Grid.Row="1" Margin="12,0,12,10" FontSize="11"
                        Foreground="#CDD6F4" TextWrapping="Wrap"/>
 
+            <!-- Nút hành động nhanh (tuỳ chọn, chỉ hiện khi ShowToast truyền quickActions) -->
+            <StackPanel x:Name="PanelQuickActions" Grid.Row="2" Orientation="Horizontal"
+                        Margin="12,0,12,10" Visibility="Collapsed"/>
+
             <!-- Progress countdown bar -->
-            <Border Grid.Row="2" Background="#313244" CornerRadius="0,0,10,10" ClipToBounds="True">
+            <Border Grid.Row="3" Background="#313244" CornerRadius="0,0,10,10" ClipToBounds="True">
                 <Border x:Name="PbFill" Background="#FAB387" CornerRadius="0,0,10,10" HorizontalAlignment="Left"/>
             </Border>
         </Grid>

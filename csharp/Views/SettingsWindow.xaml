@@ -105,6 +105,48 @@
                 </Button>
             </StackPanel>
 
+            <!-- Quick Haiku hotkey -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <TextBlock Text="Phím tắt ⚡ Haiku (/model haiku):" Foreground="#CDD6F4" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <Border BorderBrush="#45475A" BorderThickness="1" CornerRadius="4" Background="#1E1E2E"
+                        VerticalAlignment="Center">
+                    <TextBox x:Name="TxtQuickHaikuHotkey" Width="140" Background="Transparent" Foreground="#A6E3A1"
+                             BorderThickness="0" Padding="6,3" FontSize="11" IsReadOnly="True"
+                             VerticalContentAlignment="Center" Cursor="Hand"
+                             PreviewKeyDown="TxtQuickHaikuHotkey_PreviewKeyDown"
+                             GotFocus="TxtQuickHaikuHotkey_GotFocus" LostFocus="TxtQuickHaikuHotkey_LostFocus"
+                             ToolTip="Click vào rồi bấm tổ hợp phím mới (mặc định: Ctrl+Shift+H)"/>
+                </Border>
+                <Button x:Name="BtnResetQuickHaikuHotkey" Content="Mặc định" Margin="6,0,0,0"
+                        Background="#313244" Foreground="#A6ADC8" BorderThickness="0"
+                        Padding="6,3" FontSize="10" Cursor="Hand" Click="BtnResetQuickHaikuHotkey_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+
+            <!-- Quick Compact hotkey -->
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <TextBlock Text="Phím tắt 🧹 Compact (/compact):" Foreground="#CDD6F4" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                <Border BorderBrush="#45475A" BorderThickness="1" CornerRadius="4" Background="#1E1E2E"
+                        VerticalAlignment="Center">
+                    <TextBox x:Name="TxtQuickCompactHotkey" Width="140" Background="Transparent" Foreground="#A6E3A1"
+                             BorderThickness="0" Padding="6,3" FontSize="11" IsReadOnly="True"
+                             VerticalContentAlignment="Center" Cursor="Hand"
+                             PreviewKeyDown="TxtQuickCompactHotkey_PreviewKeyDown"
+                             GotFocus="TxtQuickCompactHotkey_GotFocus" LostFocus="TxtQuickCompactHotkey_LostFocus"
+                             ToolTip="Click vào rồi bấm tổ hợp phím mới (mặc định: Ctrl+Shift+C)"/>
+                </Border>
+                <Button x:Name="BtnResetQuickCompactHotkey" Content="Mặc định" Margin="6,0,0,0"
+                        Background="#313244" Foreground="#A6ADC8" BorderThickness="0"
+                        Padding="6,3" FontSize="10" Cursor="Hand" Click="BtnResetQuickCompactHotkey_Click">
+                    <Button.Resources>
+                        <Style TargetType="Border"><Setter Property="CornerRadius" Value="4"/></Style>
+                    </Button.Resources>
+                </Button>
+            </StackPanel>
+
             <!-- Webhook URL -->
             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                 <TextBlock Text="Webhook URL (Discord/Slack):" Foreground="#CDD6F4" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -140,6 +182,9 @@
                 <TextBlock Text="Độ rõ cửa sổ HUD (%):" Foreground="#CDD6F4" FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"/>
                 <TextBox x:Name="TxtHudOpacity" Text="100" Width="50" Background="#1E1E2E" Foreground="#CDD6F4" BorderBrush="#45475A" Padding="4" HorizontalContentAlignment="Center"/>
             </StackPanel>
+
+            <CheckBox x:Name="ChkAutoPrivacy" Content="Tự động bật Chế độ riêng tư khi phát hiện Zoom/Teams/OBS đang chạy (tự tắt khi họp kết thúc)"
+                      Foreground="#CDD6F4" FontSize="11" Margin="0,8,0,0"/>
 
             <Rectangle Height="1" Fill="#313244" Margin="0,14"/>
 

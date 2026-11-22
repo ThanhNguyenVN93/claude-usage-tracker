@@ -29,8 +29,6 @@ namespace ClaudeUsageTracker.Services
         }
 
         /// <returns>false nếu Windows từ chối (tổ hợp đã bị app khác/instance khác chiếm).</returns>
-        public bool Register(AppConfig config) => Register(config.HotkeyModifiers, config.HotkeyVirtualKey);
-
         public bool Register(uint modifiers, uint vk)
         {
             _modifiers = modifiers;

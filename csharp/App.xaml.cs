@@ -40,6 +40,8 @@ namespace ClaudeUsageTracker
         private ReleaseInfo? _availableUpdate;
         private ToolStripMenuItem? _updateMenuItem;
         private Font? _menuFont;
+        private ToolStripMenuItem? _privacyMenuItem;
+        private bool _privacyAutoEnabled;
         private string? _lastIconHex;
         private int _lastIconPct = -2;
         private GlobalHotkeyService? _hotkey;
@@ -137,12 +139,7 @@ namespace ClaudeUsageTracker
             UpdateTrayTooltip(_lastUsage);
 
             _hotkey = new GlobalHotkeyService(ToggleHud);
-            try { _hotkey.Register(_config); }
-            catch { /* hotkey bị app khác chiếm: bỏ qua, không crash */ }
-
             _hotkeyStats = new GlobalHotkeyService(OpenStats, 0x9002);
-            try { _hotkeyStats.Register(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey); }
-            catch { }
 
             _hotkeyQuickHaiku = new GlobalHotkeyService(() => RunOnUi(async () =>
             {
@@ -156,7 +153,7 @@ namespace ClaudeUsageTracker
                 ToastWindow.ShowToast(ok ? "🧹 Đã gửi /compact" : "⚠ Không gửi được lệnh", msg, ok ? "🧹" : "⚠️");
             }, "HotkeyQuickCompact"), 0x9004);
 
-            RegisterQuickHotkeys();
+            RegisterAllHotkeys(showConflictToast: true);
 
             _watcherService.OnClaudeLaunched += OnClaudeLaunched;
             _watcherService.Start();
@@ -178,6 +175,7 @@ namespace ClaudeUsageTracker
                 {
                     _snoozeMenuItem.Text = "🔕 Tắt thông báo 1 giờ";
                 }
+                CheckAutoPrivacy();
                 await RefreshUsageAsync();
             };
             _tick.Start();
@@ -222,7 +220,24 @@ namespace ClaudeUsageTracker
             if (!_config.PrivacyMode)
             {
                 string icon = level == AlertLevel.Critical ? "🔴" : level == AlertLevel.Warn ? "🟡" : "🔔";
-                ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast);
+                // Cảnh báo quota cao (Warn/Critical) kèm nút xử lý ngay — đỡ phải mở HUD rồi mới đổi model.
+                IReadOnlyList<(string label, Action action)>? quickActions =
+                    level is AlertLevel.Critical or AlertLevel.Warn
+                        ? new (string, Action)[]
+                          {
+                              ("⚡ Haiku", () => RunOnUi(async () =>
+                              {
+                                  var (ok, msg) = await SendTerminalCommandAsync("/model haiku");
+                                  ToastWindow.ShowToast(ok ? "⚡ Đã gửi /model haiku" : "⚠ Không gửi được lệnh", msg, ok ? "⚡" : "⚠️");
+                              }, "ToastQuickHaiku")),
+                              ("🧹 Compact", () => RunOnUi(async () =>
+                              {
+                                  var (ok, msg) = await SendTerminalCommandAsync("/compact");
+                                  ToastWindow.ShowToast(ok ? "🧹 Đã gửi /compact" : "⚠ Không gửi được lệnh", msg, ok ? "🧹" : "⚠️");
+                              }, "ToastQuickCompact")),
+                          }
+                        : null;
+                ToastWindow.ShowToast(title, message, icon, onAction: ShowHudFromToast, quickActions: quickActions);
             }
 
             if (IsValidWebhook(_config.WebhookUrl))
@@ -361,18 +376,21 @@ namespace ClaudeUsageTracker
                 CopyPromptSnippet("Chỉ liệt kê tên file và số dòng bị lỗi, chưa cần sửa."));
             contextMenu.Items.Add(promptsMenu);
 
-            var privacyItem = new ToolStripMenuItem("👁 Chế độ riêng tư (Ẩn khi share màn hình)")
+            _privacyMenuItem = new ToolStripMenuItem("👁 Chế độ riêng tư (Ẩn khi share màn hình)")
             {
                 Checked = _config.PrivacyMode,
                 CheckOnClick = true
             };
-            privacyItem.Click += (s, e) =>
+            _privacyMenuItem.Click += (s, e) =>
             {
-                _config.PrivacyMode = privacyItem.Checked;
+                _config.PrivacyMode = _privacyMenuItem.Checked;
+                // Người dùng tự tắt tay thì đừng để tick sau của Auto-Privacy bật lại ngay —
+                // tôn trọng lựa chọn thủ công cho tới khi app phát hiện lại 1 phiên họp MỚI.
+                if (!_config.PrivacyMode) _privacyAutoEnabled = false;
                 ConfigService.Save(_config);
                 if (_config.PrivacyMode) _hud?.Hide();
             };
-            contextMenu.Items.Add(privacyItem);
+            contextMenu.Items.Add(_privacyMenuItem);
 
             contextMenu.Items.Add(new ToolStripSeparator());
             contextMenu.Items.Add("⚙ Cài đặt", null, (s, e) => OpenSettings());
@@ -1024,19 +1042,7 @@ Start-Sleep -Seconds 2
             {
                 ConfigService.Save(_config);
                 _hud?.ApplyOpacity(_config.HudOpacity);
-                // Nhả tạm 2 hotkey nhanh trước: nếu người dùng vừa đổi hotkey HUD/Stats trùng
-                // Ctrl+Shift+H/C, bên giữ trước (hotkey nhanh) sẽ làm Reregister bên dưới fail oan.
-                _hotkeyQuickHaiku?.Unregister();
-                _hotkeyQuickCompact?.Unregister();
-
-                bool hudOk = true, statsOk = true;
-                try { hudOk = _hotkey?.Reregister(_config.HotkeyModifiers, _config.HotkeyVirtualKey) ?? true; } catch { hudOk = false; }
-                try { statsOk = _hotkeyStats?.Reregister(_config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey) ?? true; } catch { statsOk = false; }
-                if (!hudOk || !statsOk)
-                    ToastWindow.ShowToast("Không đăng ký được phím tắt",
-                        "Tổ hợp phím đang bị ứng dụng khác chiếm. Hãy chọn tổ hợp khác trong Cài đặt.", "🟡");
-
-                RegisterQuickHotkeys();
+                RegisterAllHotkeys(showConflictToast: true);
                 if (_hudMenuItem != null)
                     _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
                 // Khởi động lại vòng sync nền: lúc khởi động nếu chưa có SessionKey thì vòng lặp không bao giờ chạy,
@@ -1172,39 +1178,84 @@ Start-Sleep -Seconds 2
         private Task<(bool Ok, string Message)> SendTerminalCommandAsync(string command) =>
             TerminalCommandService.SendCommandAsync(_foregroundWatcher?.LastTargetHwnd ?? IntPtr.Zero, command);
 
-        private const uint QuickHaikuModifiers = 0x0006, QuickHaikuVk = 0x48;     // Ctrl+Shift+H
-        private const uint QuickCompactModifiers = 0x0006, QuickCompactVk = 0x43; // Ctrl+Shift+C
+        private static readonly string[] MeetingProcessNames = { "Zoom", "Teams", "ms-teams", "obs64" };
 
-        // Ctrl+Shift+H/C gắn cứng (chưa cho đổi trong Settings). Nếu người dùng đặt hotkey HUD/Stats
-        // trùng tổ hợp này, RegisterHotKey của Windows chỉ cho MỘT nơi giữ cùng tổ hợp — bên đăng ký
-        // sau sẽ fail âm thầm. Kiểm tra trước và báo cho người dùng biết thay vì để mất tính năng không rõ lý do.
-        private void RegisterQuickHotkeys()
+        private static bool IsMeetingAppRunning()
         {
-            bool haikuCollides = Collides(QuickHaikuModifiers, QuickHaikuVk);
-            bool compactCollides = Collides(QuickCompactModifiers, QuickCompactVk);
-
-            if (!haikuCollides)
+            foreach (var name in MeetingProcessNames)
             {
-                try { _hotkeyQuickHaiku?.Register(QuickHaikuModifiers, QuickHaikuVk); } catch { }
+                Process[] procs;
+                try { procs = Process.GetProcessesByName(name); }
+                catch { continue; }
+                try { if (procs.Length > 0) return true; }
+                finally { foreach (var p in procs) p.Dispose(); }
             }
-            if (!compactCollides)
-            {
-                try { _hotkeyQuickCompact?.Register(QuickCompactModifiers, QuickCompactVk); } catch { }
-            }
+            return false;
+        }
 
-            if (haikuCollides || compactCollides)
+        // Tự bật/tắt Privacy Mode theo sự có mặt của Zoom/Teams/OBS. Chỉ tự TẮT lại khi chính
+        // tính năng này là bên đã bật (cờ _privacyAutoEnabled) — không đụng vào lựa chọn thủ công
+        // của người dùng nếu họ tự bật Privacy Mode khi không họp.
+        private void CheckAutoPrivacy()
+        {
+            if (!_config.AutoPrivacyEnabled) return;
+            bool meeting = IsMeetingAppRunning();
+
+            if (meeting && !_config.PrivacyMode)
             {
-                string which = haikuCollides && compactCollides ? "⚡ Haiku (Ctrl+Shift+H) và 🧹 Compact (Ctrl+Shift+C)"
-                    : haikuCollides ? "⚡ Haiku (Ctrl+Shift+H)" : "🧹 Compact (Ctrl+Shift+C)";
-                ToastWindow.ShowToast("⚠ Phím tắt nhanh bị trùng",
-                    $"{which} trùng với phím tắt HUD/Thống kê bạn đã đặt trong Cài đặt nên không hoạt động. Đổi một trong hai tổ hợp để dùng được cả hai.",
-                    "⚠️");
+                _config.PrivacyMode = true;
+                _privacyAutoEnabled = true;
+                if (_privacyMenuItem != null) _privacyMenuItem.Checked = true;
+                ConfigService.Save(_config);
+                _hud?.Hide();
+            }
+            else if (!meeting && _privacyAutoEnabled && _config.PrivacyMode)
+            {
+                _config.PrivacyMode = false;
+                _privacyAutoEnabled = false;
+                if (_privacyMenuItem != null) _privacyMenuItem.Checked = false;
+                ConfigService.Save(_config);
+                ToastWindow.ShowToast("👁 Đã tắt Chế độ riêng tư", "Không còn thấy Zoom/Teams/OBS đang chạy.", "👁");
             }
         }
 
-        private bool Collides(uint mod, uint vk) =>
-            (mod == _config.HotkeyModifiers && vk == _config.HotkeyVirtualKey) ||
-            (mod == _config.StatsHotkeyModifiers && vk == _config.StatsHotkeyVirtualKey);
+        // Cả 4 hotkey đều do người dùng tự đặt trong Settings nên có thể trùng nhau bất kỳ lúc nào.
+        // Windows chỉ cho MỘT nơi giữ mỗi tổ hợp — đăng ký lần lượt, bên trùng với bên đã giữ trước
+        // sẽ bị bỏ qua có chủ đích (thay vì để RegisterHotKey tự fail âm thầm) và báo cho người dùng biết.
+        private void RegisterAllHotkeys(bool showConflictToast)
+        {
+            _hotkey?.Unregister();
+            _hotkeyStats?.Unregister();
+            _hotkeyQuickHaiku?.Unregister();
+            _hotkeyQuickCompact?.Unregister();
+
+            var claimed = new List<(uint mod, uint vk)>();
+            var conflicts = new List<string>();
+
+            bool TryClaim(GlobalHotkeyService? svc, uint mod, uint vk, string label)
+            {
+                if (svc == null || mod == 0 || vk == 0) return false;
+                if (claimed.Any(c => c.mod == mod && c.vk == vk))
+                {
+                    conflicts.Add(label);
+                    return false;
+                }
+                bool ok;
+                try { ok = svc.Register(mod, vk); } catch { ok = false; }
+                if (ok) claimed.Add((mod, vk)); else conflicts.Add(label);
+                return ok;
+            }
+
+            TryClaim(_hotkey, _config.HotkeyModifiers, _config.HotkeyVirtualKey, "📊 HUD");
+            TryClaim(_hotkeyStats, _config.StatsHotkeyModifiers, _config.StatsHotkeyVirtualKey, "📈 Thống kê");
+            TryClaim(_hotkeyQuickHaiku, _config.QuickHaikuModifiers, _config.QuickHaikuVirtualKey, "⚡ Haiku");
+            TryClaim(_hotkeyQuickCompact, _config.QuickCompactModifiers, _config.QuickCompactVirtualKey, "🧹 Compact");
+
+            if (showConflictToast && conflicts.Count > 0)
+                ToastWindow.ShowToast("⚠ Phím tắt bị trùng",
+                    $"{string.Join(", ", conflicts)} không đăng ký được vì trùng tổ hợp với phím tắt khác. Đổi trong Cài đặt.",
+                    "⚠️");
+        }
 
         private void ExitApplication()
         {
