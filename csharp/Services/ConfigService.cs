@@ -41,6 +41,8 @@ namespace ClaudeUsageTracker.Services
         public bool PrivacyMode { get; set; } = false;
         // Tự bật Chế độ riêng tư khi thấy Zoom/Teams/OBS đang chạy, tự tắt lại khi đóng.
         public bool AutoPrivacyEnabled { get; set; } = false;
+        // Chỉ hiện HUD ở terminal/IDE khi đang chạy claude (Claude Desktop luôn hiện).
+        public bool HudOnlyWithClaude { get; set; } = true;
         // Độ mờ của HUD (0.65 - 1.0)
         public double HudOpacity { get; set; } = 1.0;
         // Hotkey lệnh nhanh /model haiku và /compact qua Terminal. Mặc định Ctrl+Shift+H / Ctrl+Shift+C.

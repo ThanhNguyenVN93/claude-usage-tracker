@@ -185,6 +185,8 @@
 
             <CheckBox x:Name="ChkAutoPrivacy" Content="Tự động bật Chế độ riêng tư khi phát hiện Zoom/Teams/OBS đang chạy (tự tắt khi họp kết thúc)"
                       Foreground="#CDD6F4" FontSize="11" Margin="0,8,0,0"/>
+            <CheckBox x:Name="ChkHudOnlyClaude" Content="Chỉ hiện HUD ở terminal/IDE khi đang chạy claude (Claude Desktop luôn hiện)"
+                      Foreground="#CDD6F4" FontSize="11" Margin="0,8,0,0"/>
 
             <Rectangle Height="1" Fill="#313244" Margin="0,14"/>
 

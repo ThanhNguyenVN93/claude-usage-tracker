@@ -23,6 +23,7 @@
     <Compile Include="..\Services\ProcessUtil.cs" />
     <Compile Include="..\Services\ClaudeUsageService.cs" />
     <Compile Include="..\Models\UsageInfo.cs" />
+    <Compile Include="..\Services\ForegroundTargetPolicy.cs" />
   </ItemGroup>
 
 </Project>

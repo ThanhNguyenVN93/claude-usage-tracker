@@ -571,6 +571,21 @@ Console.WriteLine("ClaudeUsageService");
     Directory.Delete(dir, true);
 }
 
+{
+    bool P(string proc, string title, bool child, bool only) =>
+        ClaudeUsageTracker.Services.ForegroundTargetPolicy.IsHudAllowed(proc, title, child, only);
+    Check("Policy: Claude Desktop → true", P("Claude", "", false, true));
+    Check("Policy: WindowsTerminal title thường → false", !P("WindowsTerminal", "PowerShell", false, true));
+    Check("Policy: powershell title thường → false", !P("powershell", "Windows PowerShell", false, true));
+    Check("Policy: title chứa 'claude' (hoa/thường) → true",
+        P("WindowsTerminal", "CLAUDE code", false, true) && P("pwsh", "my claude session", false, true));
+    Check("Policy: Code có child claude → true", P("Code", "main.cs - proj", true, true));
+    Check("Policy: agy/antigravity → false dù có child claude",
+        !P("WindowsTerminal", "agy", true, true) && !P("Code", "Antigravity - x", true, true));
+    Check("Policy: toggle tắt → hành vi cũ (true)", P("WindowsTerminal", "PowerShell", false, false));
+    Check("Policy: ClaudeUsageTracker không đổi (false)", !P("ClaudeUsageTracker", "claude", true, true));
+}
+
 Console.WriteLine();
 Console.WriteLine($"Kết quả: {passed} pass, {failed} fail");
 return failed == 0 ? 0 : 1;

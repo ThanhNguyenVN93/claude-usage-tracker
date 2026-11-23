@@ -127,7 +127,7 @@ namespace ClaudeUsageTracker
             if (Environment.ProcessPath is string selfPath) UpdateLogic.CleanupOld(selfPath);
             _watcherService = new ProcessWatcherService(_config.CheckIntervalSeconds);
             _fileWatcherService = new UsageFileWatcherService();
-            _foregroundWatcher = new ForegroundAppWatcherService();
+            _foregroundWatcher = new ForegroundAppWatcherService(() => _config.HudOnlyWithClaude);
 
             SetupNotifyIcon();
 
@@ -1059,6 +1059,7 @@ Start-Sleep -Seconds 2
             {
                 ConfigService.Save(_config);
                 _hud?.ApplyOpacity(_config.HudOpacity);
+                _foregroundWatcher?.Reevaluate();
                 RegisterAllHotkeys(showConflictToast: true);
                 if (_hudMenuItem != null)
                     _hudMenuItem.Text = $"📊 Bảng Usage (HUD)   [{FormatHotkey(_config.HotkeyModifiers, _config.HotkeyVirtualKey)}]";
