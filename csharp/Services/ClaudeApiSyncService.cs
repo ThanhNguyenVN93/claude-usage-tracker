@@ -28,12 +28,16 @@ namespace ClaudeUsageTracker.Services
         // → read-modify-write cli-usage.json / plan-usage-history.json chồng nhau làm mất sample. Tuần tự hoá.
         private readonly SemaphoreSlim _syncLock = new(1, 1);
         private volatile bool _paused;
+        private DateTime _lastAuthWarnAt;
+
+        public string? LastError { get; private set; }
+        public event Action<string>? OnAuthError;
 
         public ClaudeApiSyncService()
         {
             _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             _http.DefaultRequestHeaders.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) ClaudeUsageTracker/2.0");
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
         }
 
         // ── Public API ───────────────────────────────────────────────────────
@@ -132,12 +136,24 @@ namespace ClaudeUsageTracker.Services
                 return;
             }
 
+            LastError = null;
             WriteCliUsage(usage);
             WriteDesktopHistory(usage);
 
             System.Diagnostics.Debug.WriteLine(
                 $"[ApiSync] ✅ session={usage.FiveHourPct:0.0}% weekly={usage.SevenDayPct:0.0}% " +
                 $"reset={usage.FiveHourResetsAt:HH:mm}");
+        }
+
+        private void ReportAuthFailure(int statusCode)
+        {
+            string msg = $"API sync bị từ chối (HTTP {statusCode}). SessionKey có thể đã hết hạn hoặc bị Cloudflare chặn — hãy lấy lại sessionKey mới trong Cài đặt.";
+            LastError = msg;
+            if ((DateTime.Now - _lastAuthWarnAt).TotalMinutes >= 60)
+            {
+                _lastAuthWarnAt = DateTime.Now;
+                OnAuthError?.Invoke(msg);
+            }
         }
 
         // ── HTTP calls ───────────────────────────────────────────────────────
@@ -149,8 +165,10 @@ namespace ClaudeUsageTracker.Services
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
-                System.Diagnostics.Debug.WriteLine($"[ApiSync] /organizations → {(int)res.StatusCode}");
+                int code = (int)res.StatusCode;
+                System.Diagnostics.Debug.WriteLine($"[ApiSync] /organizations → {code}");
                 _cachedOrgId = null; // invalidate cache on auth failure
+                if (code is 401 or 403) ReportAuthFailure(code);
                 return null;
             }
             string body = await res.Content.ReadAsStringAsync();
@@ -170,7 +188,9 @@ namespace ClaudeUsageTracker.Services
             using var res = await _http.SendAsync(req);
             if (!res.IsSuccessStatusCode)
             {
-                if ((int)res.StatusCode is 401 or 403 or 404) _cachedOrgId = null;
+                int code = (int)res.StatusCode;
+                if (code is 401 or 403 or 404) _cachedOrgId = null;
+                if (code is 401 or 403) ReportAuthFailure(code);
                 return null;
             }
             string body = await res.Content.ReadAsStringAsync();
@@ -183,6 +203,7 @@ namespace ClaudeUsageTracker.Services
             req.Headers.Add("Cookie",   $"sessionKey={sessionKey}");
             req.Headers.Add("Accept",   "application/json");
             req.Headers.Add("Referer",  "https://claude.ai/");
+            req.Headers.Add("Origin",   "https://claude.ai");
             req.Headers.Add("anthropic-client-platform", "web_claude_ai");
         }
 

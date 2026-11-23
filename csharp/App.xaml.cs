@@ -113,6 +113,12 @@ namespace ClaudeUsageTracker
             _config = ConfigService.Load();
             _usageService = new ClaudeUsageService();
             _apiSync = new ClaudeApiSyncService();
+            _apiSync.OnAuthError += msg => RunOnUi(() =>
+            {
+                if (!_config.PrivacyMode)
+                    ToastWindow.ShowToast("⚠ Lỗi đồng bộ Claude.ai", msg, "🔴");
+                return Task.CompletedTask;
+            }, "ApiSyncAuthError");
             _insights = new InsightsService(new HistoryService(), _config);
             _insights.PruneHistory();
             _modelSwitch = new ModelSwitchService(_config);
@@ -572,7 +578,16 @@ namespace ClaudeUsageTracker
                 }
             }
 
+            if (showFeedback && !_apiSync.Paused && !string.IsNullOrWhiteSpace(_config.SessionKey))
+            {
+                await _apiSync.SyncOnceAsync(_config);
+            }
+
             _lastUsage = await FetchUsageAsync();
+            if (_lastUsage.IsStale && !string.IsNullOrEmpty(_apiSync.LastError))
+            {
+                _lastUsage.Note = $"⚠ {_apiSync.LastError}";
+            }
             UpdateTrayTooltip(_lastUsage);
             if (_hud != null && _hud.IsVisible) _hud.ApplyData(_lastUsage);
             _countdownWindow?.ApplyData(_lastUsage);
@@ -580,10 +595,12 @@ namespace ClaudeUsageTracker
             if (showFeedback)
             {
                 bool gotNewer = previousSnapshot == null || _lastUsage.LastRefreshedAt > previousSnapshot;
-                string title = gotNewer
-                    ? $"Có số mới · {_lastUsage.PercentUsed:0}%"
-                    : $"Chưa có số mới · vẫn {_lastUsage.PercentUsed:0}%";
-                ToastWindow.ShowToast(title, _lastUsage.Note, gotNewer ? "🔄" : "ℹ️");
+                string title = !string.IsNullOrEmpty(_apiSync.LastError)
+                    ? "⚠ Sync API thất bại (403/401)"
+                    : gotNewer
+                        ? $"Có số mới · {_lastUsage.PercentUsed:0}%"
+                        : $"Chưa có số mới · vẫn {_lastUsage.PercentUsed:0}%";
+                ToastWindow.ShowToast(title, _lastUsage.Note, !string.IsNullOrEmpty(_apiSync.LastError) ? "🔴" : (gotNewer ? "🔄" : "ℹ️"));
             }
         }
 
