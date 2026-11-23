@@ -28,7 +28,11 @@ namespace ClaudeUsageTracker.Services
         // → read-modify-write cli-usage.json / plan-usage-history.json chồng nhau làm mất sample. Tuần tự hoá.
         private readonly SemaphoreSlim _syncLock = new(1, 1);
         private volatile bool _paused;
+        private volatile bool _useCurlFallback;
         private DateTime _lastAuthWarnAt;
+
+        private const string ChromeUserAgent =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
         public string? LastError { get; private set; }
         public event Action<string>? OnAuthError;
@@ -36,8 +40,7 @@ namespace ClaudeUsageTracker.Services
         public ClaudeApiSyncService()
         {
             _http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            _http.DefaultRequestHeaders.Add("User-Agent",
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+            _http.DefaultRequestHeaders.Add("User-Agent", ChromeUserAgent);
         }
 
         // ── Public API ───────────────────────────────────────────────────────
@@ -158,20 +161,91 @@ namespace ClaudeUsageTracker.Services
 
         // ── HTTP calls ───────────────────────────────────────────────────────
 
+        private async Task<(int StatusCode, string? Body)> SendGetAsync(string url, string sessionKey)
+        {
+            if (!_useCurlFallback)
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                AddHeaders(req, sessionKey);
+                using var res = await _http.SendAsync(req);
+                int code = (int)res.StatusCode;
+                if (res.IsSuccessStatusCode)
+                    return (code, await res.Content.ReadAsStringAsync());
+
+                // Cloudflare thường chặn TLS/HTTP2 fingerprint của .NET HttpClient bằng HTTP 403,
+                // trong khi curl.exe tích hợp sẵn của Windows qua được. Tự động chuyển sang curl.exe.
+                if (code == 403)
+                    _useCurlFallback = true;
+                else
+                    return (code, null);
+            }
+
+            return await SendCurlGetAsync(url, sessionKey);
+        }
+
+        private static async Task<(int StatusCode, string? Body)> SendCurlGetAsync(string url, string sessionKey)
+        {
+            try
+            {
+                string curlPath = Path.Combine(Environment.SystemDirectory, "curl.exe");
+                if (!File.Exists(curlPath)) curlPath = "curl.exe";
+
+                var psi = new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = curlPath,
+                    Arguments = "-s -w \"\\n%{http_code}\" -K -",
+                    RedirectStandardInput = true,
+                    RedirectStandardOutput = true,
+                    UseShellExecute = false,
+                    CreateNoWindow = true,
+                    StandardOutputEncoding = System.Text.Encoding.UTF8
+                };
+
+                using var proc = System.Diagnostics.Process.Start(psi);
+                if (proc == null) return (0, null);
+
+                // Truyền URL và Cookie qua stdin (-K -) để sessionKey không lộ trên dòng lệnh process.
+                string configInput =
+                    $"url = \"{url}\"\n" +
+                    $"header = \"Cookie: sessionKey={sessionKey}\"\n" +
+                    $"header = \"Accept: application/json\"\n" +
+                    $"header = \"Referer: https://claude.ai/\"\n" +
+                    $"header = \"Origin: https://claude.ai\"\n" +
+                    $"header = \"anthropic-client-platform: web_claude_ai\"\n" +
+                    $"header = \"User-Agent: {ChromeUserAgent}\"\n";
+
+                await proc.StandardInput.WriteAsync(configInput);
+                await proc.StandardInput.FlushAsync();
+                proc.StandardInput.Close();
+
+                using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(12));
+                string output = await proc.StandardOutput.ReadToEndAsync(cts.Token);
+                await proc.WaitForExitAsync(cts.Token);
+
+                int lastNl = output.LastIndexOf('\n');
+                if (lastNl < 0)
+                    return int.TryParse(output.Trim(), out int onlyCode) ? (onlyCode, null) : (0, null);
+
+                string body = output[..lastNl].TrimEnd('\r');
+                string codeStr = output[(lastNl + 1)..].Trim();
+                return int.TryParse(codeStr, out int statusCode) ? (statusCode, body) : (0, null);
+            }
+            catch
+            {
+                return (0, null);
+            }
+        }
+
         private async Task<string?> FetchOrgIdAsync(string sessionKey)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get, "https://claude.ai/api/organizations");
-            AddHeaders(req, sessionKey);
-            using var res = await _http.SendAsync(req);
-            if (!res.IsSuccessStatusCode)
+            var (code, body) = await SendGetAsync("https://claude.ai/api/organizations", sessionKey);
+            if (code is < 200 or >= 300 || string.IsNullOrEmpty(body))
             {
-                int code = (int)res.StatusCode;
                 System.Diagnostics.Debug.WriteLine($"[ApiSync] /organizations → {code}");
                 _cachedOrgId = null; // invalidate cache on auth failure
                 if (code is 401 or 403) ReportAuthFailure(code);
                 return null;
             }
-            string body = await res.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() == 0) return null;
@@ -182,18 +256,13 @@ namespace ClaudeUsageTracker.Services
 
         private async Task<ApiUsageResult?> FetchUsageAsync(string sessionKey, string orgId)
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"https://claude.ai/api/organizations/{orgId}/usage");
-            AddHeaders(req, sessionKey);
-            using var res = await _http.SendAsync(req);
-            if (!res.IsSuccessStatusCode)
+            var (code, body) = await SendGetAsync($"https://claude.ai/api/organizations/{orgId}/usage", sessionKey);
+            if (code is < 200 or >= 300 || string.IsNullOrEmpty(body))
             {
-                int code = (int)res.StatusCode;
                 if (code is 401 or 403 or 404) _cachedOrgId = null;
                 if (code is 401 or 403) ReportAuthFailure(code);
                 return null;
             }
-            string body = await res.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
             return ParseUsage(doc.RootElement);
         }
@@ -218,6 +287,7 @@ namespace ClaudeUsageTracker.Services
             double fiveHourPct  = 0;
             double sevenDayPct  = 0;
             DateTime? resetsAt  = null;
+            DateTime? weeklyResetsAt = null;
 
             // five_hour.utilization
             if (root.TryGetProperty("five_hour", out var fh) && fh.ValueKind == JsonValueKind.Object)
@@ -229,6 +299,16 @@ namespace ClaudeUsageTracker.Services
                     if (DateTimeOffset.TryParse(rat.GetString(), out var dto))
                         resetsAt = dto.UtcDateTime;
                 }
+            }
+
+            // seven_day.utilization & resets_at
+            if (root.TryGetProperty("seven_day", out var sd) && sd.ValueKind == JsonValueKind.Object)
+            {
+                if (sd.TryGetProperty("utilization", out var sdUtil) && sdUtil.ValueKind == JsonValueKind.Number)
+                    sevenDayPct = sdUtil.GetDouble();
+                if (sd.TryGetProperty("resets_at", out var sdRat) && sdRat.ValueKind == JsonValueKind.String
+                    && DateTimeOffset.TryParse(sdRat.GetString(), out var sdDto))
+                    weeklyResetsAt = sdDto.UtcDateTime;
             }
 
             // limits[] → session % và weekly %
@@ -249,8 +329,14 @@ namespace ClaudeUsageTracker.Services
                             && DateTimeOffset.TryParse(r2.GetString(), out var dto2))
                             resetsAt = dto2.UtcDateTime;
                     }
-                    else if (kind.Contains("weekly") && sevenDayPct == 0)
-                        sevenDayPct = pct;
+                    else if (kind.Contains("weekly"))
+                    {
+                        if (sevenDayPct == 0) sevenDayPct = pct;
+                        if (weeklyResetsAt == null && item.TryGetProperty("resets_at", out var r3)
+                            && r3.ValueKind == JsonValueKind.String
+                            && DateTimeOffset.TryParse(r3.GetString(), out var dto3))
+                            weeklyResetsAt = dto3.UtcDateTime;
+                    }
                 }
             }
 
@@ -261,6 +347,7 @@ namespace ClaudeUsageTracker.Services
                 FiveHourPct      = fiveHourPct,
                 SevenDayPct      = sevenDayPct,
                 FiveHourResetsAt = resetsAt?.ToLocalTime() ?? DateTime.Now.AddHours(5),
+                SevenDayResetsAt = weeklyResetsAt?.ToLocalTime(),
             };
         }
 
@@ -285,6 +372,8 @@ namespace ClaudeUsageTracker.Services
                             // sevenDayResetsAt / costUsd do statusline ghi, API không có -> phải giữ.
                             if (prop.Name is "fiveHour" or "sevenDay" or "t" or "fiveHourResetsAt")
                                 continue;
+                            if (u.SevenDayResetsAt.HasValue && prop.Name == "sevenDayResetsAt")
+                                continue;
                             existing[prop.Name] = prop.Value.Clone();
                         }
                     }
@@ -301,6 +390,11 @@ namespace ClaudeUsageTracker.Services
                 w.WriteNumber("sevenDay",          u.SevenDayPct);
                 w.WriteNumber("t",                 nowMs);
                 w.WriteNumber("fiveHourResetsAt",  resetS);
+                if (u.SevenDayResetsAt.HasValue)
+                {
+                    long weeklyResetS = new DateTimeOffset(u.SevenDayResetsAt.Value.ToUniversalTime()).ToUnixTimeSeconds();
+                    w.WriteNumber("sevenDayResetsAt", weeklyResetS);
+                }
                 // Ghi lại các field cũ
                 foreach (var kv in existing)
                 {
@@ -377,9 +471,10 @@ namespace ClaudeUsageTracker.Services
 
         private sealed class ApiUsageResult
         {
-            public double FiveHourPct      { get; set; }
-            public double SevenDayPct      { get; set; }
+            public double FiveHourPct        { get; set; }
+            public double SevenDayPct        { get; set; }
             public DateTime FiveHourResetsAt { get; set; }
+            public DateTime? SevenDayResetsAt { get; set; }
         }
     }
 }
