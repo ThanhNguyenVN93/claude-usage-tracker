@@ -94,6 +94,22 @@ Console.WriteLine("StatsService.ProjectBurn + WeeklyBudget + PromptsEst");
     Check("weekly budget: còn 60% / 3.0 ngày (~20%/ngày)", wb != null && wb.Contains("60%") && wb.Contains("20%/ngày"));
     Check("weekly budget null khi quá hạn", StatsService.ComputeWeeklyBudgetNote(40, now.AddHours(-1), now) == null);
 
+    // Lỗi API không được nuốt mất cảnh báo "số liệu cũ" — đó là bug làm HUD trưng
+    // con số đã reset từ lâu mà trông như vừa cập nhật.
+    const string staleNote = "⚠ Desktop chưa đồng bộ gần đây · 41 phút trước (20:42:40)";
+    const string apiErr = "API sync bị từ chối (HTTP 403).";
+    var both = StatsService.ComposeNote(staleNote, apiErr);
+    Check("ComposeNote giữ cả cảnh báo stale lẫn lỗi API",
+        both != null && both.Contains("chưa đồng bộ") && both.Contains("403"));
+    Check("ComposeNote chỉ có lỗi API thì tự thêm ⚠",
+        StatsService.ComposeNote(null, apiErr) == $"⚠ {apiErr}");
+    Check("ComposeNote không nhân đôi ⚠",
+        StatsService.ComposeNote(null, $"⚠ {apiErr}") == $"⚠ {apiErr}");
+    Check("ComposeNote không có lỗi API thì giữ nguyên stale",
+        StatsService.ComposeNote(staleNote, null) == staleNote);
+    Check("ComposeNote rỗng cả hai -> chuỗi rỗng",
+        StatsService.ComposeNote(null, null) == string.Empty);
+
     var pe = StatsService.EstimateRemainingPromptsNote(50);
     Check("prompts est 50%: có Opus/Sonnet/Haiku", pe != null && pe.Contains("Opus") && pe.Contains("Sonnet") && pe.Contains("Haiku"));
     Check("prompts est 100%: null", StatsService.EstimateRemainingPromptsNote(100) == null);

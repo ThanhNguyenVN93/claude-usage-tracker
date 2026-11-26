@@ -584,9 +584,9 @@ namespace ClaudeUsageTracker
             }
 
             _lastUsage = await FetchUsageAsync();
-            if (_lastUsage.IsStale && !string.IsNullOrEmpty(_apiSync.LastError))
+            if (!string.IsNullOrEmpty(_apiSync.LastError))
             {
-                _lastUsage.Note = $"⚠ {_apiSync.LastError}";
+                _lastUsage.Note = StatsService.ComposeNote(_lastUsage.Note, _apiSync.LastError);
             }
             UpdateTrayTooltip(_lastUsage);
             if (_hud != null && _hud.IsVisible) _hud.ApplyData(_lastUsage);

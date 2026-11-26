@@ -104,10 +104,17 @@ namespace ClaudeUsageTracker.Views
                 TxtModel.Visibility = Visibility.Collapsed;
             }
             TxtRefreshStatus.Visibility = Visibility.Collapsed;
-            TxtPercent.Text = $"{info.PercentUsed:0}%";
+
+            // Số liệu cũ phải nhìn ra ngay là cũ: màu xanh/vàng theo ngưỡng khiến con số
+            // đứng yên từ lâu trông y hệt số vừa cập nhật (cửa sổ 5h reset xong là lệch hẳn).
+            bool outdated = info.IsStale || !info.DesktopRunning;
+            TxtPercent.Text = outdated ? $"{info.PercentUsed:0}%*" : $"{info.PercentUsed:0}%";
+            TxtPercent.ToolTip = outdated
+                ? $"Số liệu lúc {info.LastRefreshedAt:HH:mm:ss} — có thể không còn đúng"
+                : null;
             PbUsage.Value = info.PercentUsed;
 
-            var brush = BrushCache.Get(info.StatusColorHex);
+            var brush = BrushCache.Get(outdated ? "#6C7086" : info.StatusColorHex);
             TxtPercent.Foreground = brush;
             PbUsage.Foreground = brush;
 

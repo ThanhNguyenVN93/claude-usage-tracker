@@ -74,6 +74,21 @@ namespace ClaudeUsageTracker.Services
             return new ModelBurnReport(items, sum);
         }
 
+        // Gộp ghi chú hiển thị dưới HUD. Lỗi API chỉ là NGUYÊN NHÂN; cảnh báo "số liệu cũ"
+        // mới là thứ nói cho người dùng biết con số đang hiện không còn đúng, nên không
+        // bao giờ được ghi đè nó — nếu không, lúc số liệu đứng yên vì cửa sổ 5h đã reset
+        // thì HUD vẫn trưng con số cũ mà không có dấu hiệu nào.
+        public static string ComposeNote(string? staleNote, string? apiError)
+        {
+            bool hasStale = !string.IsNullOrWhiteSpace(staleNote);
+            bool hasApi = !string.IsNullOrWhiteSpace(apiError);
+
+            if (!hasApi) return staleNote ?? string.Empty;
+
+            string apiLine = apiError!.StartsWith("⚠") ? apiError! : $"⚠ {apiError}";
+            return hasStale ? $"{staleNote}{Environment.NewLine}{apiLine}" : apiLine;
+        }
+
         // Tính ngân sách quota tuần an toàn mỗi ngày (Weekly Quota Guard).
         public static string? ComputeWeeklyBudgetNote(double weeklyPercent, DateTime? weeklyResetTime, DateTime now)
         {
