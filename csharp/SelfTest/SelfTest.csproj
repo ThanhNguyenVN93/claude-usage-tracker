@@ -24,6 +24,16 @@
     <Compile Include="..\Services\ClaudeUsageService.cs" />
     <Compile Include="..\Models\UsageInfo.cs" />
     <Compile Include="..\Services\ForegroundTargetPolicy.cs" />
+    <Compile Include="..\Services\DesktopCookieReader.cs" />
+    <Compile Include="..\Services\ClaudeApiSyncService.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- DesktopCookieReader dùng Microsoft.Data.Sqlite; bản e_sqlite3 3.x đã vá CVE. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.11" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+    <!-- SelfTest là net11.0 thuần (không WindowsDesktop) nên cần package DPAPI rời. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.0" />
   </ItemGroup>
 
 </Project>

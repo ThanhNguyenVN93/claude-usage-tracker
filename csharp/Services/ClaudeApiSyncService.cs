@@ -31,11 +31,18 @@ namespace ClaudeUsageTracker.Services
         private volatile bool _useCurlFallback;
         private DateTime _lastAuthWarnAt;
 
+        // Key lấy được từ Claude Desktop, giữ lại để không phải giải mã cookie mỗi vòng sync.
+        private string? _lastGoodDesktopKey;
+        // Lỗi auth chờ báo: gom lại trong một lượt sync, chỉ bắn toast nếu mọi key đều hỏng.
+        private string? _pendingAuthMsg;
+
         private const string ChromeUserAgent =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
         public string? LastError { get; private set; }
         public event Action<string>? OnAuthError;
+        // Phát ra khi lấy được key mới từ cookie Desktop, để App lưu vào config (sống qua restart).
+        public event Action<string>? OnDesktopKeyObtained;
 
         public ClaudeApiSyncService()
         {
@@ -48,23 +55,28 @@ namespace ClaudeUsageTracker.Services
         /// <summary>Tạm dừng sync (không dừng timer, chỉ bỏ qua mỗi lần gọi).</summary>
         public bool Paused { get => _paused; set => _paused = value; }
 
+        /// <summary>sessionKey hợp lệ: đúng tiền tố và chỉ gồm ký tự token an toàn.</summary>
+        /// Chặn giá trị chứa nháy kép / xuống dòng / dấu ; — tránh chèn directive vào curl -K
+        /// và tránh FormatException khi gắn header HttpClient.
+        internal static bool IsValidKeyFormat(string? key)
+            => key is not null && DesktopCookieReader.IsPlausibleSessionKey(key);
+
         /// <summary>Gọi một lần rồi trả về, không ném exception ra ngoài.</summary>
         public async Task SyncOnceAsync(AppConfig config)
         {
             if (Paused) return;
-            string? key = config.SessionKey; // đọc 1 lần: config có thể bị Settings sửa từ UI thread
-            if (string.IsNullOrWhiteSpace(key) || !key.StartsWith("sk-ant-"))
-                return;
 
-            try
-            {
-                await _syncLock.WaitAsync();
-            }
+            // Lấy lock TRƯỚC khi đụng tới việc chọn/đọc key: việc này đọc-ghi _lastGoodDesktopKey
+            // và có thể đọc file cookie + giải mã DPAPI → không được chạy đua trên nhiều thread.
+            try { await _syncLock.WaitAsync(); }
             catch (ObjectDisposedException) { return; }
 
+            string? keyToPersist = null;
+            string? authMsg = null;
             try
             {
-                await DoSyncAsync(key);
+                if (Paused) return; // Paused có thể bật lên trong lúc chờ lock.
+                (keyToPersist, authMsg) = await SyncInsideLockAsync(config);
             }
             catch (Exception ex)
             {
@@ -72,21 +84,120 @@ namespace ClaudeUsageTracker.Services
             }
             finally
             {
-                _syncLock.Release();
+                try { _syncLock.Release(); } catch (ObjectDisposedException) { }
+            }
+
+            // Bắn event NGOÀI lock: handler có thể ghi disk / đụng UI thread / gọi ngược vào đây —
+            // giữ lock khi gọi sẽ treo lock hoặc deadlock (SemaphoreSlim không reentrant).
+            if (keyToPersist is not null)
+            {
+                try { OnDesktopKeyObtained?.Invoke(keyToPersist); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ApiSync] OnDesktopKeyObtained: {ex.Message}"); }
+            }
+            if (authMsg is not null)
+            {
+                try { OnAuthError?.Invoke(authMsg); }
+                catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[ApiSync] OnAuthError: {ex.Message}"); }
             }
         }
+
+        // Trả về (key Desktop cần lưu lại, thông báo lỗi auth cần bắn) — việc bắn để lại cho caller
+        // làm sau khi nhả lock.
+        private async Task<(string? keyToPersist, string? authMsg)> SyncInsideLockAsync(AppConfig config)
+        {
+            _pendingAuthMsg = null;
+            var tried = new HashSet<string>(StringComparer.Ordinal);
+
+            foreach (var (key, isDesktop) in EnumerateCandidateKeys(config))
+            {
+                if (!tried.Add(key)) continue;
+
+                bool ok = await DoSyncAsync(key);
+                if (ok)
+                {
+                    // Chỉ lưu key Desktop SAU khi nó đã sync thành công — không ghi key hết hạn vào config.
+                    string? persist = null;
+                    if (isDesktop && key != _lastGoodDesktopKey)
+                    {
+                        _lastGoodDesktopKey = key;
+                        persist = key;
+                    }
+                    return (persist, null);
+                }
+            }
+
+            // Mọi ứng viên đều hỏng. Chỉ coi là lỗi auth (và kích cooldown) khi THỰC SỰ có lỗi auth
+            // và đang có người nghe — tránh nuốt cảnh báo đầu tiên khi UI chưa gắn handler.
+            if (_pendingAuthMsg is { } msg && OnAuthError is not null &&
+                (DateTime.UtcNow - _lastAuthWarnAt).TotalMinutes >= 60)
+            {
+                _lastAuthWarnAt = DateTime.UtcNow;
+                return (null, msg);
+            }
+            return (null, null);
+        }
+
+        // Danh sách key theo thứ tự ưu tiên, KHÔNG side-effect (không gán _lastGoodDesktopKey ở đây —
+        // chỉ PersistDesktopKey sau khi verify mới gán). Key thủ công trước (người dùng có thể cố ý dùng
+        // tài khoản khác), rồi key Desktop (đang nhớ trong RAM, rồi cache config đã giải mã, rồi đọc mới).
+        private IEnumerable<(string key, bool isDesktop)> EnumerateCandidateKeys(AppConfig config)
+        {
+            if (IsValidKeyFormat(config.SessionKey))
+                yield return (config.SessionKey, false);
+
+            if (!config.AutoSessionKeyFromDesktop)
+                yield break;
+
+            if (IsValidKeyFormat(_lastGoodDesktopKey))
+                yield return (_lastGoodDesktopKey!, true);
+
+            // Cache từ phiên trước (DPAPI) — giải mã; HashSet 'tried' ở caller tự loại nếu trùng key RAM.
+            string cached = ConfigService.UnprotectSecret(config.CachedDesktopSessionKey);
+            if (IsValidKeyFormat(cached))
+                yield return (cached, true);
+
+            // Đọc mới từ cookie (chỉ khi Desktop đã tắt — lúc chạy file bị khóa độc quyền).
+            string? fresh = ReadDesktopCookieKey(config);
+            if (IsValidKeyFormat(fresh))
+                yield return (fresh!, true);
+        }
+
+        // Đọc key từ cookie Desktop. KHÔNG tự lưu/không bắn event.
+        private string? ReadDesktopCookieKey(AppConfig config)
+        {
+            if (DesktopIsRunning())
+                return null; // file cookie bị khóa khi Desktop chạy → đọc chắc chắn fail, khỏi thử.
+
+            var r = DesktopCookieReader.TryGetSessionKey(
+                string.IsNullOrWhiteSpace(config.ClaudeDesktopDirOverride) ? null : config.ClaudeDesktopDirOverride);
+            if (!r.Success)
+                System.Diagnostics.Debug.WriteLine($"[ApiSync] Auto-key từ Desktop thất bại: {r.Error}");
+            return r.SessionKey;
+        }
+
+        // Dùng cho unit test: lấy ứng viên key đầu tiên (không side-effect).
+        internal string? ResolveSessionKey(AppConfig config)
+        {
+            foreach (var (key, _) in EnumerateCandidateKeys(config))
+                return key;
+            return null;
+        }
+
+        // Tách ra để unit test ghi đè được (thật thì hỏi ProcessUtil).
+        internal Func<bool>? DesktopRunningProbe { get; set; }
+        private bool DesktopIsRunning() => DesktopRunningProbe?.Invoke() ?? ProcessUtil.IsClaudeRunning();
 
         /// <summary>Bắt đầu (hoặc khởi động lại) vòng lặp sync định kỳ (chạy ngầm).</summary>
         public void StartBackground(AppConfig config, bool syncImmediately = true)
         {
             // Huỷ vòng cũ trước — gọi lại từ Settings không được tạo 2 vòng song song / leak CTS.
-            var old = _cts;
-            _cts = null;
+            // Interlocked.Exchange: hai lần StartBackground song song không ghi đè _cts của nhau.
+            var old = Interlocked.Exchange(ref _cts, null);
             try { old?.Cancel(); } catch (ObjectDisposedException) { }
             old?.Dispose();
 
-            if (string.IsNullOrWhiteSpace(config.SessionKey) ||
-                !config.SessionKey.StartsWith("sk-ant-"))
+            bool hasManual = IsValidKeyFormat(config.SessionKey);
+            if (!hasManual && !config.AutoSessionKeyFromDesktop)
                 return;
 
             int secs = config.ApiSyncIntervalSeconds;
@@ -109,16 +220,21 @@ namespace ClaudeUsageTracker.Services
                     try { await Task.Delay(interval, token); }
                     catch (OperationCanceledException) { break; }
                     catch (ObjectDisposedException) { break; }
+                    if (token.IsCancellationRequested) break; // huỷ đúng lúc Delay vừa xong → đừng sync thêm.
                     await SyncOnceAsync(config);
                 }
             }, token);
         }
 
-        public void Stop() => _cts?.Cancel();
+        public void Stop()
+        {
+            try { _cts?.Cancel(); } catch (ObjectDisposedException) { }
+        }
 
         // ── Internals ────────────────────────────────────────────────────────
 
-        private async Task DoSyncAsync(string sessionKey)
+        /// <summary>Trả true nếu sync thành công (đã ghi dữ liệu usage).</summary>
+        private async Task<bool> DoSyncAsync(string sessionKey)
         {
             // Đổi sessionKey (tài khoản khác) → org-id cũ không còn đúng, server trả 403 chứ không phải 401.
             if (_cachedOrgKey != sessionKey) _cachedOrgId = null;
@@ -127,7 +243,7 @@ namespace ClaudeUsageTracker.Services
             if (string.IsNullOrEmpty(orgId))
             {
                 System.Diagnostics.Debug.WriteLine("[ApiSync] Không lấy được org_id — sessionKey hết hạn?");
-                return;
+                return false;
             }
             _cachedOrgId = orgId;
             _cachedOrgKey = sessionKey;
@@ -136,7 +252,7 @@ namespace ClaudeUsageTracker.Services
             if (usage == null)
             {
                 System.Diagnostics.Debug.WriteLine("[ApiSync] Không lấy được dữ liệu usage.");
-                return;
+                return false;
             }
 
             LastError = null;
@@ -146,17 +262,24 @@ namespace ClaudeUsageTracker.Services
             System.Diagnostics.Debug.WriteLine(
                 $"[ApiSync] ✅ session={usage.FiveHourPct:0.0}% weekly={usage.SevenDayPct:0.0}% " +
                 $"reset={usage.FiveHourResetsAt:HH:mm}");
+            return true;
         }
 
+        // Ghi lại lỗi auth nhưng CHƯA bắn toast — việc thông báo để SyncInsideLockAsync quyết định
+        // sau khi đã thử hết các key ứng viên, tránh báo lỗi giả khi một key sau đó thành công.
         private void ReportAuthFailure(int statusCode)
         {
-            string msg = $"API sync bị từ chối (HTTP {statusCode}). SessionKey có thể đã hết hạn hoặc bị Cloudflare chặn — hãy lấy lại sessionKey mới trong Cài đặt.";
+            // Sau khi curl fallback đã bật mà vẫn 403 thì gần như chắc là sessionKey hết hạn,
+            // không phải Cloudflare chặn fingerprint .NET nữa — nói thẳng để người dùng khỏi đoán.
+            string cause = _useCurlFallback
+                ? "sessionKey đã hết hạn"
+                : "sessionKey hết hạn hoặc bị Cloudflare chặn";
+            string fix = DesktopIsRunning()
+                ? "Mở lại claude.ai để Claude Desktop làm mới phiên, hoặc đóng Desktop một lát để widget tự lấy key mới."
+                : "Đăng nhập lại Claude Desktop, hoặc dán sessionKey mới trong Cài đặt.";
+            string msg = $"API sync bị từ chối (HTTP {statusCode}) — {cause}. {fix}";
             LastError = msg;
-            if ((DateTime.Now - _lastAuthWarnAt).TotalMinutes >= 60)
-            {
-                _lastAuthWarnAt = DateTime.Now;
-                OnAuthError?.Invoke(msg);
-            }
+            _pendingAuthMsg = msg;
         }
 
         // ── HTTP calls ───────────────────────────────────────────────────────

@@ -8,6 +8,14 @@ namespace ClaudeUsageTracker.Services
     {
         // sessionKey từ cookie claude.ai (sk-ant-sid...) — dùng để sync quota thời gian thực
         public string SessionKey { get; set; } = string.Empty;
+        // Tự lấy sessionKey từ cookie của Claude Desktop (khỏi F12 thủ công). Chỉ đọc phiên của
+        // chính người dùng, trên máy họ; bật mặc định để sync "cắm là chạy".
+        public bool AutoSessionKeyFromDesktop { get; set; } = true;
+        // Ghi đè thư mục %APPDATA%\Claude (để kiểm thử; rỗng = dùng mặc định).
+        public string ClaudeDesktopDirOverride { get; set; } = string.Empty;
+        // Key lấy được từ cookie Desktop (lúc Desktop tắt), lưu lại để dùng tiếp khi Desktop
+        // đang chạy (file cookie bị khóa, không đọc lại được). Lưu text thuần như SessionKey.
+        public string CachedDesktopSessionKey { get; set; } = string.Empty;
         public int ApiSyncIntervalSeconds { get; set; } = 300;
         public int CheckIntervalSeconds { get; set; } = 2;
         public int StaleThresholdMinutes { get; set; } = 15;
@@ -111,6 +119,51 @@ namespace ClaudeUsageTracker.Services
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"[Config] Save error: {ex.Message}");
+            }
+        }
+
+        private const string DpapiMarker = "dpapi:";
+
+        /// <summary>
+        /// Bọc một bí mật bằng DPAPI (gắn tài khoản+máy) rồi Base64, để không ghi plaintext ra
+        /// config.json. Trả chuỗi có tiền tố "dpapi:". DPAPI lỗi thì trả nguyên giá trị (không chặn luồng).
+        /// </summary>
+        public static string ProtectSecret(string? plain)
+        {
+            if (string.IsNullOrEmpty(plain)) return string.Empty;
+            try
+            {
+                byte[] enc = System.Security.Cryptography.ProtectedData.Protect(
+                    System.Text.Encoding.UTF8.GetBytes(plain), null,
+                    System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                return DpapiMarker + Convert.ToBase64String(enc);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Config] ProtectSecret error: {ex.Message}");
+                return plain;
+            }
+        }
+
+        /// <summary>
+        /// Gỡ bọc. Giá trị có tiền tố "dpapi:" thì giải mã; không có (config cũ / plaintext) thì
+        /// trả nguyên — vừa tương thích ngược vừa dễ test.
+        /// </summary>
+        public static string UnprotectSecret(string? stored)
+        {
+            if (string.IsNullOrEmpty(stored)) return string.Empty;
+            if (!stored.StartsWith(DpapiMarker, StringComparison.Ordinal)) return stored;
+            try
+            {
+                byte[] dec = System.Security.Cryptography.ProtectedData.Unprotect(
+                    Convert.FromBase64String(stored.Substring(DpapiMarker.Length)), null,
+                    System.Security.Cryptography.DataProtectionScope.CurrentUser);
+                return System.Text.Encoding.UTF8.GetString(dec);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"[Config] UnprotectSecret error: {ex.Message}");
+                return string.Empty;
             }
         }
     }

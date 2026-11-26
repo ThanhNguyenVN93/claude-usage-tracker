@@ -602,6 +602,145 @@ Console.WriteLine("ClaudeUsageService");
     Check("Policy: ClaudeUsageTracker không đổi (false)", !P("ClaudeUsageTracker", "claude", true, true));
 }
 
+Console.WriteLine("DesktopCookieReader.DecryptCookie");
+{
+    // Dựng blob v10 đúng chuẩn Chromium (prefix "v10" + nonce12 + cipher + tag16) rồi kiểm giải mã.
+    byte[] MakeV10(byte[] key, string plaintext, byte[]? nonceOverride = null)
+    {
+        byte[] nonce = nonceOverride ?? System.Security.Cryptography.RandomNumberGenerator.GetBytes(12);
+        byte[] pt = System.Text.Encoding.UTF8.GetBytes(plaintext);
+        byte[] ct = new byte[pt.Length];
+        byte[] tag = new byte[16];
+        using (var gcm = new System.Security.Cryptography.AesGcm(key, 16))
+            gcm.Encrypt(nonce, pt, ct, tag);
+        var o = new byte[3 + 12 + ct.Length + 16];
+        o[0] = (byte)'v'; o[1] = (byte)'1'; o[2] = (byte)'0';
+        Buffer.BlockCopy(nonce, 0, o, 3, 12);
+        Buffer.BlockCopy(ct, 0, o, 15, ct.Length);
+        Buffer.BlockCopy(tag, 0, o, 15 + ct.Length, 16);
+        return o;
+    }
+
+    byte[] key = System.Security.Cryptography.RandomNumberGenerator.GetBytes(32);
+    const string secret = "sk-ant-sid01-abcDEF123_round-trip-value";
+    var blob = MakeV10(key, secret);
+
+    bool Throws<T>(Action act) where T : Exception
+    {
+        try { act(); return false; }
+        catch (T) { return true; }
+        catch { return false; }
+    }
+
+    Check("DecryptCookie round-trip v10", DesktopCookieReader.DecryptCookie(blob, key) == secret);
+
+    Check("DecryptCookie sai key → ném (tag không khớp)",
+        Throws<System.Security.Cryptography.CryptographicException>(
+            () => DesktopCookieReader.DecryptCookie(blob, System.Security.Cryptography.RandomNumberGenerator.GetBytes(32))));
+
+    byte[] v11 = MakeV10(key, secret); v11[2] = (byte)'1';
+    Check("DecryptCookie v11 cũng được chấp nhận", DesktopCookieReader.DecryptCookie(v11, key) == secret);
+
+    Check("DecryptCookie blob quá ngắn → ném",
+        Throws<System.IO.InvalidDataException>(() => DesktopCookieReader.DecryptCookie(new byte[]{ 1, 2 }, key)));
+
+    Check("DecryptCookie v10 thiếu nonce/tag → ném",
+        Throws<System.IO.InvalidDataException>(
+            () => DesktopCookieReader.DecryptCookie(new byte[]{ (byte)'v',(byte)'1',(byte)'0', 0,0,0 }, key)));
+
+    Check("DecryptCookie v20 (App-Bound) → ném rõ",
+        Throws<System.IO.InvalidDataException>(
+            () => DesktopCookieReader.DecryptCookie(new byte[]{ (byte)'v',(byte)'2',(byte)'0', 1,2,3 }, key)));
+
+    // Schema v24+: 32 byte SHA256(host_key) chèn đầu plaintext → phải cắt đúng khi có host_key.
+    const string host = ".claude.ai";
+    byte[] hostHash = System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(host));
+    byte[] secretBytes = System.Text.Encoding.UTF8.GetBytes(secret);
+    byte[] prefixed = new byte[hostHash.Length + secretBytes.Length];
+    Buffer.BlockCopy(hostHash, 0, prefixed, 0, hostHash.Length);
+    Buffer.BlockCopy(secretBytes, 0, prefixed, hostHash.Length, secretBytes.Length);
+    // MakeV10 dùng UTF8 (hỏng byte nhị phân của hash) nên dựng blob v24 trực tiếp để byte chuẩn xác:
+    byte[] BuildV24()
+    {
+        byte[] nonce = System.Security.Cryptography.RandomNumberGenerator.GetBytes(12);
+        byte[] ct = new byte[prefixed.Length];
+        byte[] tag = new byte[16];
+        using (var gcm = new System.Security.Cryptography.AesGcm(key, 16))
+            gcm.Encrypt(nonce, prefixed, ct, tag);
+        var o = new byte[3 + 12 + ct.Length + 16];
+        o[0] = (byte)'v'; o[1] = (byte)'1'; o[2] = (byte)'0';
+        Buffer.BlockCopy(nonce, 0, o, 3, 12);
+        Buffer.BlockCopy(ct, 0, o, 15, ct.Length);
+        Buffer.BlockCopy(tag, 0, o, 15 + ct.Length, 16);
+        return o;
+    }
+    byte[] v24 = BuildV24();
+    Check("DecryptCookie v24 cắt đúng 32-byte host hash", DesktopCookieReader.DecryptCookie(v24, key, host) == secret);
+    Check("DecryptCookie v24 sai host → KHÔNG cắt (giữ nguyên 32 byte đầu)",
+        DesktopCookieReader.DecryptCookie(v24, key, "other.host") != secret);
+
+    Check("IsPlausibleSessionKey loại ký tự lạ (%)", !DesktopCookieReader.IsPlausibleSessionKey("sk-ant-sid01-a%b"));
+    Check("IsPlausibleSessionKey nhận base64url sạch", DesktopCookieReader.IsPlausibleSessionKey("sk-ant-sid01-AbC_123-xyz0000"));
+    Check("IsPlausibleSessionKey loại quá ngắn", !DesktopCookieReader.IsPlausibleSessionKey("sk-ant-"));
+
+    // Thiếu thư mục Desktop → trả lỗi gọn, không ném ra ngoài.
+    var miss = DesktopCookieReader.TryGetSessionKey(Path.Combine(Path.GetTempPath(), "cut-no-such-" + Guid.NewGuid().ToString("N")));
+    Check("TryGetSessionKey thư mục không tồn tại → Success=false, có Error",
+        !miss.Success && miss.SessionKey == null && !string.IsNullOrEmpty(miss.Error));
+}
+
+Console.WriteLine("ClaudeApiSyncService: auto-key chỉ đọc cookie khi Desktop tắt");
+{
+    // Thư mục Desktop giả không tồn tại để ép TryGetSessionKey luôn fail → cô lập đúng phần
+    // "có đụng tới việc đọc cookie hay không" theo trạng thái Desktop running.
+    string fakeDir = Path.Combine(Path.GetTempPath(), "cut-fake-" + Guid.NewGuid().ToString("N"));
+    var cfg = new AppConfig
+    {
+        SessionKey = "",
+        AutoSessionKeyFromDesktop = true,
+        ClaudeDesktopDirOverride = fakeDir,
+        ApiSyncIntervalSeconds = 0
+    };
+
+    using var svc = new ClaudeApiSyncService();
+    svc.DesktopRunningProbe = () => true; // Desktop "đang chạy" → không được đọc file cookie bị khóa.
+
+    // Chưa có cache, Desktop đang chạy → không có key nào để thử.
+    Check("Desktop chạy + chưa có cache → không có key", svc.ResolveSessionKey(cfg) == null);
+
+    // Có cache hợp lệ từ phiên trước → dùng được ngay cả khi Desktop đang chạy (không cần đọc file).
+    cfg.CachedDesktopSessionKey = "sk-ant-sid01-cached-key-from-previous-session";
+    Check("Desktop chạy + có cache → dùng key cache", svc.ResolveSessionKey(cfg) == cfg.CachedDesktopSessionKey);
+
+    // Manual key luôn thắng auto.
+    cfg.SessionKey = "sk-ant-sid01-manual-wins";
+    Check("Manual key ưu tiên hơn auto", svc.ResolveSessionKey(cfg) == "sk-ant-sid01-manual-wins");
+
+    // Cache rác (sai định dạng) không được chốt cứng — vẫn rơi xuống nhánh khác (ở đây = null vì Desktop chạy).
+    using var svc2 = new ClaudeApiSyncService { DesktopRunningProbe = () => true };
+    var cfg2 = new AppConfig { SessionKey = "", AutoSessionKeyFromDesktop = true, CachedDesktopSessionKey = "rác-không-hợp-lệ" };
+    Check("Cache sai định dạng → bỏ qua, không chốt", svc2.ResolveSessionKey(cfg2) == null);
+
+    // Key chứa ký tự nguy hiểm (chèn curl -K) bị loại.
+    Check("IsValidKeyFormat loại nháy kép", !ClaudeApiSyncService.IsValidKeyFormat("sk-ant-sid01-a\"b"));
+    Check("IsValidKeyFormat loại xuống dòng", !ClaudeApiSyncService.IsValidKeyFormat("sk-ant-sid01-a\nurl=evil"));
+    Check("IsValidKeyFormat nhận key sạch", ClaudeApiSyncService.IsValidKeyFormat("sk-ant-sid01-AbC_123-xyz"));
+    Check("IsValidKeyFormat loại sai tiền tố", !ClaudeApiSyncService.IsValidKeyFormat("xx-ant-sid01-abc"));
+}
+
+Console.WriteLine("ConfigService.ProtectSecret round-trip (DPAPI)");
+{
+    const string secret = "sk-ant-sid01-protect-roundtrip-value";
+    string prot = ConfigService.ProtectSecret(secret);
+    Check("ProtectSecret có tiền tố dpapi:", prot.StartsWith("dpapi:"));
+    Check("ProtectSecret không chứa plaintext", !prot.Contains("protect-roundtrip"));
+    Check("UnprotectSecret khôi phục đúng", ConfigService.UnprotectSecret(prot) == secret);
+    Check("UnprotectSecret với plaintext cũ → trả nguyên (tương thích ngược)",
+        ConfigService.UnprotectSecret("sk-ant-sid01-legacy-plain") == "sk-ant-sid01-legacy-plain");
+    Check("Protect/Unprotect chuỗi rỗng → rỗng",
+        ConfigService.ProtectSecret("") == "" && ConfigService.UnprotectSecret("") == "");
+}
+
 Console.WriteLine();
 Console.WriteLine($"Kết quả: {passed} pass, {failed} fail");
 return failed == 0 ? 0 : 1;

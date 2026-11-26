@@ -20,6 +20,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Đọc cookie store (SQLite) của Claude Desktop để tự lấy sessionKey. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="9.0.11" />
+    <PackageReference Include="SQLitePCLRaw.bundle_e_sqlite3" Version="3.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="SelfTest\**" />
     <EmbeddedResource Remove="SelfTest\**" />
     <None Remove="SelfTest\**" />

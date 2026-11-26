@@ -119,6 +119,19 @@ namespace ClaudeUsageTracker
                     ToastWindow.ShowToast("⚠ Lỗi đồng bộ Claude.ai", msg, "🔴");
                 return Task.CompletedTask;
             }, "ApiSyncAuthError");
+
+            // Lấy được sessionKey mới từ cookie Desktop (lúc Desktop tắt) → lưu để dùng tiếp
+            // khi Desktop mở lại (file cookie khi đó bị khóa, không đọc lại được).
+            _apiSync.OnDesktopKeyObtained += key => RunOnUi(() =>
+            {
+                // So sánh bản đã giải mã; chỉ ghi khi key thực sự đổi. Lưu dưới dạng DPAPI, không plaintext.
+                if (ConfigService.UnprotectSecret(_config.CachedDesktopSessionKey) != key)
+                {
+                    _config.CachedDesktopSessionKey = ConfigService.ProtectSecret(key);
+                    ConfigService.Save(_config);
+                }
+                return Task.CompletedTask;
+            }, "DesktopKeyObtained");
             _insights = new InsightsService(new HistoryService(), _config);
             _insights.PruneHistory();
             _modelSwitch = new ModelSwitchService(_config);
@@ -578,7 +591,8 @@ namespace ClaudeUsageTracker
                 }
             }
 
-            if (showFeedback && !_apiSync.Paused && !string.IsNullOrWhiteSpace(_config.SessionKey))
+            if (showFeedback && !_apiSync.Paused &&
+                (!string.IsNullOrWhiteSpace(_config.SessionKey) || _config.AutoSessionKeyFromDesktop))
             {
                 await _apiSync.SyncOnceAsync(_config);
             }
@@ -1066,7 +1080,8 @@ Start-Sleep -Seconds 2
                 // Khởi động lại vòng sync nền: lúc khởi động nếu chưa có SessionKey thì vòng lặp không bao giờ chạy,
                 // và đổi ApiSyncIntervalSeconds cũng không có hiệu lực nếu không restart. StartBackground sync ngay 1 lần.
                 _apiSync.StartBackground(_config);
-                if (_config.ApiSyncIntervalSeconds <= 0 && !string.IsNullOrWhiteSpace(_config.SessionKey))
+                bool canSync = !string.IsNullOrWhiteSpace(_config.SessionKey) || _config.AutoSessionKeyFromDesktop;
+                if (_config.ApiSyncIntervalSeconds <= 0 && canSync)
                     _ = _apiSync.SyncOnceAsync(_config);
                 _ = RefreshUsageAsync();
             }
